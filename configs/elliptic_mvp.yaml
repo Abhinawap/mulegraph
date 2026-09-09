@@ -1,0 +1,60 @@
+# MVP benchmark: Elliptic++ transaction graph, both regimes, five model configs.
+#
+#   uv run mulegraph run --config configs/elliptic_mvp.yaml
+#
+# Produces report/tables/elliptic_mvp_results.csv covering the two-by-two
+# {xgb, sage} x {base, base_gfp} plus the xgb.raw165 reference row, on the random
+# and temporal splits, over five seeds.
+
+dataset:
+  name: elliptic_pp
+  version: "2023.1"
+
+features:
+  backend: gfp                      # igraph fallback retired in week-1 gate 1
+  families: [fan, degree, scatter_gather, lc_cycle]
+  bins: [2, 4, 8, 16, 32]
+  window:
+    default: 1                      # one timestep; Elliptic timesteps are disconnected
+    scatter_gather: 1
+  cycle_len: 10
+  vertex_stats: true                # per-vertex fan / degree / ratio
+  num_threads: 8
+
+split:
+  regimes:
+    # Transductive and leaky by design: the comparison that shows what a random
+    # split buys you. SAGE sees test nodes' features here, never their labels.
+    - regime: random
+      fractions: [0.7, 0.15, 0.15]
+      seed: 0
+    # The only leakage-free regime on Elliptic; inductive by construction because
+    # timestep components are disconnected (D1). Test spans the dark-market
+    # shutdown at ~t43.
+    - regime: temporal
+      train_end: 34
+      val: [35, 37]
+      test: [38, 49]
+
+models:
+  - {name: xgb,  features: base}          # 93 local features
+  - {name: xgb,  features: base_gfp}
+  - {name: sage, features: base,     sampler: {kind: neighbor, fanout: [15, 10]}}
+  - {name: sage, features: base_gfp, sampler: {kind: neighbor, fanout: [15, 10]}}
+  - {name: xgb,  features: raw165}        # published block, incl. 72 one-hop aggregates
+
+search:
+  enabled: false                    # v1a; W is set by week-one gate 5
+  trial_ceiling: {xgb: 40, sage: 20}
+  search_seed: 0
+
+seeds: [0, 1, 2, 3, 4]
+
+eval:
+  metrics: [f1, pr_auc, roc_auc, p_at_r50, p_at_r80]
+  seed_ci: t95
+
+mlflow:
+  experiment: elliptic_mvp
+
+device: auto

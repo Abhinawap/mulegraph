@@ -8,7 +8,28 @@ Add a dated entry for every milestone tag and every change that alters behaviour
 
 ## Unreleased
 
-Next entry will be the Python package skeleton and the remaining week-1 timing results (gates 2–5).
+Next entry will be the component modules (loader, feature builder, splits, models, evaluator) and the remaining week-1 timing results (gates 2–5).
+
+---
+
+## 9 Sep 2026 — Python package foundation
+
+### Added
+- `pyproject.toml` with fully pinned dependencies and a committed `uv.lock` (NFR-1), plus `.python-version`, `README.md` and a GitHub Actions workflow running ruff, format check and pytest on every push. Tests needing the real Elliptic++ files are marked `elliptic` and skipped in CI, which cannot download the dataset.
+- `mulegraph/types.py` — the shared types every component depends on (`GraphDataset`, `DatasetMeta`, `FeatureMatrix`, `Split`, `Predictions`, `DriftSignal`), each validating its own shapes and dtypes on construction. Arrays are NumPy throughout; only the GNN converts to torch, which keeps features, splits and evaluation cheap to test.
+- `mulegraph/config.py` — strict Pydantic schema for `configs/*.yaml` (`extra="forbid"`, so a mistyped key is an error rather than a silently ignored setting), with `MULEGRAPH_FEATURE_BACKEND` / `MULEGRAPH_DEVICE` overrides logged when applied.
+- `mulegraph/util.py` — paths from the environment, content hashing, git provenance, seeding, and a `Timer` whose output feeds the week-one budget arithmetic.
+- `mulegraph/data/synthetic.py` — a synthetic Elliptic-shaped generator with planted signal (shifted local features and fan-in stars on illicit nodes). It does two things the real dataset cannot: give CI something to run end to end, and provide a graph whose edges genuinely span timesteps, without which the PR-F2 causality test is vacuous.
+- `mulegraph/models/base.py`, `mulegraph/search.py`, `mulegraph/cli.py` — the model protocol (PR-M5), the search phase, and the Typer entry point. `drift`, `simulate` and `report` exit with a one-sentence message naming the milestone that will deliver them.
+- `configs/elliptic_mvp.yaml` (both regimes in one file, so one command produces the whole MVP table) and `configs/smoke.yaml`.
+
+### Decided
+- **Python 3.11 is kept, so XGBoost is pinned at 3.2.0** — 3.3+ require Python ≥3.12. The spec's tech stack says "XGBoost 2.x"; 3.2.0 is the newest release compatible with the pinned interpreter and its `XGBClassifier` API is unchanged for our use.
+- **No search runs in the MVP** (`search.enabled: false`, and `true` is a validation error). The budget is wall-clock and must be identical for every model (D2), but `W` is not known until week-one gate 5. Runs therefore log `trials_completed: 0` rather than a nominal 1 — an honest zero, not a faked search.
+- Torch installs from PyPI (already a CUDA 13.0 build, matching the driver here) with `pyg-lib` from the PyG wheel index via `find-links`; no custom PyTorch index and no extras.
+
+### Fixed
+- **The GFP drive pattern recorded in the gate-1 entry above was wrong.** `transform` inserts the batch into the in-memory graph itself, so the documented `partial_fit(batch_t)` then `transform(batch_t)` inserts every batch twice and doubles every degree, fan and histogram count (verified: a vertex with 2 out-edges reports 4). The correct pattern is `transform(batch_t)` alone, for t ascending. Corrected here and in `project_status.md`; the feature builder will expose no method that can call `partial_fit`, and a unit test pins the counts.
 
 ---
 
@@ -23,8 +44,8 @@ Next entry will be the Python package skeleton and the remaining week-1 timing r
 - Output is deterministic across repeated runs and across thread counts (1 vs 12), satisfying NFR-1 for the feature stage.
 
 ### Constraint discovered (affects PR-F2)
-- **GFP is causal only by usage, not by construction.** The preprocessor is stateful: `partial_fit` accumulates the graph, `transform` reads accumulated state. Ingesting the full edge table before transforming leaks future edges into past rows — demonstrated on a toy fixture where a *t1* transaction acquired neighbour amount statistics produced by a *t2* edge.
-- Consequence: `mulegraph/features/` MUST drive GFP strictly in time order, one batch at a time (`partial_fit(batch_t)` then `transform(batch_t)`), and must never fit globally before transforming. PR-F2 is therefore an implementation constraint on the feature builder, not merely a configuration setting, and the synthetic multi-timestep causality fixture is the test that guards it.
+- **GFP is causal only by usage, not by construction.** The preprocessor is stateful, and `transform` inserts the batch it is given before scoring it. Ingesting the full edge table before transforming leaks future edges into past rows — demonstrated on a toy fixture where a *t1* transaction acquired neighbour amount statistics produced by a *t2* edge.
+- Consequence: `mulegraph/features/` MUST drive GFP strictly in time order, one batch at a time, calling **`transform(batch_t)` only**. `transform` inserts the batch itself, so calling `partial_fit` first inserts it twice and doubles every count. PR-F2 is therefore an implementation constraint on the feature builder, not merely a configuration setting, and the synthetic multi-timestep causality fixture is the test that guards it.
 
 ### Notes
 - `lc-cycle` cost is superlinear in graph density: 4,000 edges over 400 nodes did not complete in 3 minutes, while the same edge count over 3,000 nodes finished in seconds. Elliptic's per-timestep components are sparse, but the cycle bound must be timed on real data before `W` is fixed.
