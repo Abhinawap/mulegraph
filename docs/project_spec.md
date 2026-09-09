@@ -140,7 +140,7 @@ This is a command-line research toolkit, not a web application. Several conventi
 | Graph features | IBM `snapml` GraphFeaturePreprocessor; fallback `igraph` implementation | GFP is the published feature set; fallback covers install failure |
 | Hyperparameter search | Optuna, run once per (model config, regime, dataset) under one wall-clock cap shared by every model; trial 0 is a fixed reference config; best config rerun across seeds | Wall-clock is the only budget that can be made equal across a tree model and a GNN (D2); trials completed is logged, not promised (PR-M6) |
 | Drift detection | `evidently` (PSI, KS) plus a small MMD implementation in PyTorch | Reuse tested statistics; only the batching and embedding-drift glue is custom |
-| Experiment tracking | MLflow, local file store | Already in use across existing repos; queryable for report generation |
+| Experiment tracking | MLflow, local SQLite file (`sqlite:///mlruns/mlflow.db`) | Already in use across existing repos; queryable for report generation. MLflow 3 refuses its own `file:` store ("in maintenance mode"), and numbers must still regenerate from a tagged commit in 2027 (NFR-1, S5); SQLite is one file with no server, so §2.3's "no database server" still holds |
 | Data storage | Parquet (pyarrow) for tabular caches, `torch.save` for PyG `Data`, NumPy `.npy` for split indices | No database server; everything is files keyed by content hash |
 | Testing | pytest, pytest-cov | Unit and smoke tests (NFR-2) |
 | Lint and format | ruff | Fast, single tool |

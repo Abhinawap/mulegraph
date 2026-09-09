@@ -238,11 +238,23 @@ class EvalConfig(Strict):
 
 
 class MLflowConfig(Strict):
+    """Where runs are recorded.
+
+    A local SQLite file rather than MLflow's ``file:`` store: MLflow 3 refuses the
+    file store outright ("in maintenance mode and will not receive further
+    updates"), and a dissertation whose numbers must still regenerate from a
+    tagged commit in 2027 cannot rest on a backend that is being retired (NFR-1,
+    S5). SQLite keeps the spec's constraint that there is no database *server* —
+    it is one file under ``mlruns/`` — while staying on a supported path.
+    """
+
     experiment: str
     tracking_uri: str | None = None
 
     def resolved_uri(self) -> str:
-        return self.tracking_uri or os.environ.get("MLFLOW_TRACKING_URI", "file:./mlruns")
+        return self.tracking_uri or os.environ.get(
+            "MLFLOW_TRACKING_URI", "sqlite:///mlruns/mlflow.db"
+        )
 
 
 class RunConfig(Strict):

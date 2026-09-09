@@ -41,7 +41,7 @@ docs/
 
 ## Tech Stack
 
-Python 3.11 · Typer · Pydantic · PyTorch 2.x + PyTorch Geometric · XGBoost 2.x · scikit-learn · Optuna · MLflow (local file store) · evidently · pyarrow/Parquet · pytest · ruff · uv
+Python 3.11 · Typer · Pydantic · PyTorch 2.x + PyTorch Geometric · XGBoost 3.2 (newest supporting 3.11) · scikit-learn · Optuna · MLflow (local SQLite file; the `file:` store is refused by MLflow 3) · evidently · pyarrow/Parquet · pytest · ruff · uv
 
 Deliberately absent: frontend, HTTP API, database server, cloud services, LLMs.
 
@@ -106,7 +106,7 @@ uv run ruff check . && uv run ruff format .
 uv run pytest --cov=mulegraph
 
 # Tracking
-uv run mlflow ui --backend-store-uri ./mlruns
+uv run mlflow ui --backend-store-uri sqlite:///mlruns/mlflow.db
 ```
 
 ## Testing

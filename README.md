@@ -69,7 +69,7 @@ uv run mulegraph run --config configs/elliptic_mvp.yaml
 uv run mulegraph smoke
 
 # Browse the runs
-uv run mlflow ui --backend-store-uri ./mlruns
+uv run mlflow ui --backend-store-uri sqlite:///mlruns/mlflow.db
 ```
 
 Results are files, not stdout: tables land in `report/tables/`, figures in `report/figures/`.
