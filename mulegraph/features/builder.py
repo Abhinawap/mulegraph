@@ -1,0 +1,250 @@
+"""Build, version and cache causal graph features (PR-F1, PR-F2, PR-F3).
+
+One entry point, :func:`build_features`, which walks the graph forward one
+timestep at a time, drives GFP through :class:`~mulegraph.features.gfp.GfpDriver`
+(the only object allowed to touch snapml), folds each batch onto nodes with
+``node_agg_v1``, and caches the result under a hash of the *definition* rather
+than of the output.
+
+That hash, ``feature_version``, covers the backend and its version, the enabled
+families, bins, windows, cycle bound, vertex statistics, the aggregation name,
+the drive pattern, both column lists, and the dataset version. ``drive`` is in
+there deliberately: the batch-by-batch pattern is what makes the features causal,
+so a future change to it must invalidate every cache rather than quietly reuse
+numbers computed under the old one.
+"""
+
+from __future__ import annotations
+
+import importlib.metadata as importlib_metadata
+import json
+import logging
+from pathlib import Path
+
+import numpy as np
+
+from mulegraph.config import FeaturesConfig
+from mulegraph.features.aggregate import empty_node_features, node_agg_v1, node_columns
+from mulegraph.features.gfp import (
+    DUMMY_COLUMN,
+    RAW_WIDTH,
+    GfpDriver,
+    GfpLayout,
+    make_gfp_params,
+    probe_layout,
+)
+from mulegraph.types import DatasetMeta, FeatureMatrix, GraphDataset
+from mulegraph.util import Timer, hash_dict, write_json
+
+log = logging.getLogger("mulegraph")
+
+#: The drive pattern the cache key is bound to. See the module docstring.
+DRIVE = "transform_only"
+
+#: A timestep slower than this gets a warning: ``lc-cycle`` cost is superlinear in
+#: density (4k edges over 400 nodes did not finish in 3 minutes during week-1
+#: gate 1, while the same 4k edges over 3k nodes took seconds), so a slow
+#: timestep is a signal to revisit ``cycle_len`` before it eats into W.
+SLOW_TIMESTEP_SECONDS = 60.0
+
+#: Prefix on every column of the returned matrix, so a joined table never has an
+#: ambiguous ``fan_in_bin2``.
+COLUMN_PREFIX = "gfp_"
+
+
+def snapml_version() -> str:
+    try:
+        return importlib_metadata.version("snapml")
+    except importlib_metadata.PackageNotFoundError:  # pragma: no cover - env without snapml
+        return "unknown"
+
+
+def feature_definition(
+    cfg: FeaturesConfig, meta: DatasetMeta, layout: GfpLayout
+) -> dict[str, object]:
+    """The complete, hashable description of what the feature columns mean."""
+    return {
+        "backend": cfg.backend,
+        "snapml_version": snapml_version(),
+        "families": list(cfg.families),
+        "bins": list(cfg.bins),
+        "window": {
+            "default": cfg.window.default,
+            "scatter_gather": cfg.window.scatter_gather,
+        },
+        "cycle_len": cfg.cycle_len,
+        "vertex_stats": cfg.vertex_stats,
+        "vertex_stats_feats": list(make_gfp_params(cfg)["vertex_stats_feats"]),  # type: ignore[arg-type]
+        "aggregation": cfg.aggregation,
+        "drive": DRIVE,
+        "edge_columns": list(layout.columns),
+        "node_columns": node_columns(layout),
+        "dataset": meta.dataset,
+        "dataset_version": meta.version,
+    }
+
+
+def feature_version(cfg: FeaturesConfig, meta: DatasetMeta, layout: GfpLayout) -> str:
+    """sha256 prefix over the feature definition, logged with every run (PR-F3)."""
+    return hash_dict(feature_definition(cfg, meta, layout))
+
+
+def _batch(edge_ids: np.ndarray, src: np.ndarray, dst: np.ndarray, t: int) -> np.ndarray:
+    """One timestep's edges as snapml's float64 input rows.
+
+    ``edge_ids`` are the dataset's global edge indices: snapml overwrites an edge
+    whose id it has seen before, so per-batch ids would erase history.
+    """
+    batch = np.empty((edge_ids.size, RAW_WIDTH), dtype=np.float64)
+    batch[:, 0] = edge_ids
+    batch[:, 1] = src
+    batch[:, 2] = dst
+    batch[:, 3] = t
+    batch[:, DUMMY_COLUMN] = 1.0
+    return batch
+
+
+def _read_cache(path: Path, columns: list[str], time: np.ndarray) -> FeatureMatrix | None:
+    import pyarrow.parquet as pq
+
+    table = pq.read_table(path)
+    names = list(table.column_names)
+    if names[:2] != ["id", "time"]:
+        raise ValueError(f"feature cache {path} does not start with id, time: {names[:2]}")
+    if names[2:] != columns:
+        raise ValueError(
+            f"feature cache {path} holds columns {names[2:]} but this feature version "
+            f"defines {columns}; delete the cache or fix the definition"
+        )
+    values = np.column_stack(
+        [table.column(name).to_numpy(zero_copy_only=False) for name in columns]
+    ).astype(np.float32)
+    cached_time = table.column("time").to_numpy(zero_copy_only=False).astype(np.int64)
+    if not np.array_equal(cached_time, time):
+        raise ValueError(f"feature cache {path} was built for different node timestamps")
+    return FeatureMatrix(
+        values=values,
+        columns=columns,
+        time=time,
+        feature_version=path.stem,
+        name="gfp",
+        blocks={"gfp": (0, len(columns))},
+    )
+
+
+def _write_cache(
+    path: Path,
+    values: np.ndarray,
+    ids: np.ndarray,
+    time: np.ndarray,
+    columns: list[str],
+) -> None:
+    import pyarrow as pa
+    import pyarrow.parquet as pq
+
+    arrays = [pa.array(ids), pa.array(time)]
+    arrays.extend(pa.array(values[:, i]) for i in range(values.shape[1]))
+    table = pa.Table.from_arrays(arrays, names=["id", "time", *columns])
+    path.parent.mkdir(parents=True, exist_ok=True)
+    pq.write_table(table, path)
+
+
+def build_features(
+    data: GraphDataset,
+    cfg: FeaturesConfig,
+    cache_dir: Path,
+    *,
+    force: bool = False,
+) -> FeatureMatrix:
+    """Compute causal node-level graph features, or load them from cache.
+
+    Args:
+        data: the graph. Only ``edge_index``, ``edge_time`` and ``node_time`` are
+            read; node features play no part.
+        cfg: feature configuration; ``backend`` must be ``"gfp"``.
+        cache_dir: dataset cache root; features land in ``<cache_dir>/features/``.
+        force: recompute and overwrite even when a cache entry exists.
+
+    Returns:
+        A ``FeatureMatrix`` with one row per node, aligned to node order.
+    """
+    if cfg.backend == "igraph":
+        raise NotImplementedError(
+            "igraph fallback is not built: snapml GFP installed in week-1 gate 1 (9 Sep 2026), "
+            "so the fallback was retired"
+        )
+
+    layout = probe_layout(cfg)
+    fv = feature_version(cfg, data.meta, layout)
+    columns = [COLUMN_PREFIX + name for name in node_columns(layout)]
+    parquet_path = Path(cache_dir) / "features" / f"{fv}.parquet"
+    json_path = parquet_path.with_suffix(".json")
+
+    if parquet_path.is_file() and not force:
+        log.info("features %s: cache hit at %s", fv, parquet_path)
+        cached = _read_cache(parquet_path, columns, data.node_time)
+        if cached is not None:
+            return cached
+
+    times = np.unique(data.edge_time)
+    log.info(
+        "features %s: computing %d columns for %d nodes over %d timesteps (%d edges)",
+        fv,
+        len(columns),
+        data.num_nodes,
+        times.size,
+        data.num_edges,
+    )
+    driver = GfpDriver(make_gfp_params(cfg), layout)
+    values = empty_node_features(data.num_nodes, layout)
+    src_all, dst_all = data.src, data.dst
+    per_timestep: dict[str, float] = {}
+
+    with Timer() as total:
+        for t in times.tolist():
+            mask = np.flatnonzero(data.edge_time == t)
+            with Timer() as step:
+                edge_feats = driver.step(_batch(mask, src_all[mask], dst_all[mask], t))
+                node_agg_v1(
+                    values, edge_feats, src_all[mask], dst_all[mask], data.node_time, t, layout
+                )
+            per_timestep[str(t)] = round(step.seconds, 3)
+            log.info("gfp t=%d edges=%d secs=%.2f", t, mask.size, step.seconds)
+            if step.seconds > SLOW_TIMESTEP_SECONDS:
+                log.warning(
+                    "gfp t=%d took %.1fs for %d edges; lc-cycle cost is superlinear in density, "
+                    "so consider lowering features.cycle_len before it eats the search budget",
+                    t,
+                    step.seconds,
+                    mask.size,
+                )
+
+    log.info("features %s: done in %.1fs", fv, total.seconds)
+    _write_cache(parquet_path, values, data.node_ids, data.node_time, columns)
+    write_json(
+        json_path,
+        {
+            "feature_version": fv,
+            "definition": feature_definition(cfg, data.meta, layout),
+            "edge_columns": list(layout.columns),
+            "node_columns": node_columns(layout),
+            "matrix_columns": columns,
+            "snapml_version": snapml_version(),
+            "seconds_per_timestep": per_timestep,
+            "seconds_total": round(total.seconds, 3),
+        },
+    )
+    return FeatureMatrix(
+        values=values,
+        columns=columns,
+        time=data.node_time,
+        feature_version=fv,
+        name="gfp",
+        blocks={"gfp": (0, len(columns))},
+    )
+
+
+def load_definition(cache_dir: Path, fv: str) -> dict[str, object]:
+    """Read back the stored definition for a feature version, for provenance."""
+    path = Path(cache_dir) / "features" / f"{fv}.json"
+    return json.loads(path.read_text())
