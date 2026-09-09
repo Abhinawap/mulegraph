@@ -15,6 +15,8 @@ Next entry will be the component modules (loader, feature builder, splits, model
 ## 9 Sep 2026 — Python package foundation
 
 ### Added
+- Repository pushed to GitHub (`Abhinawap/mulegraph`, private) with four Milestones carrying the spec's due dates and 25 issues, one per §1.3 milestone deliverable, each listing its requirement ids, done-criteria and applicable integrity constraints. Delivered MVP items are closed citing their commits; a closed "not planned" issue lists every Later / Not-in-scope item so the boundary is visible where work is tracked (NFR-5).
+- `.claude/skills/issue`, `close-issue`, `issues-sync` — commands that create spec-aware issues (refusing out-of-scope work), close them with commit evidence while ticking `project_status.md`, and report drift between the two.
 - `pyproject.toml` with fully pinned dependencies and a committed `uv.lock` (NFR-1), plus `.python-version`, `README.md` and a GitHub Actions workflow running ruff, format check and pytest on every push. Tests needing the real Elliptic++ files are marked `elliptic` and skipped in CI, which cannot download the dataset.
 - `mulegraph/types.py` — the shared types every component depends on (`GraphDataset`, `DatasetMeta`, `FeatureMatrix`, `Split`, `Predictions`, `DriftSignal`), each validating its own shapes and dtypes on construction. Arrays are NumPy throughout; only the GNN converts to torch, which keeps features, splits and evaluation cheap to test.
 - `mulegraph/config.py` — strict Pydantic schema for `configs/*.yaml` (`extra="forbid"`, so a mistyped key is an error rather than a silently ignored setting), with `MULEGRAPH_FEATURE_BACKEND` / `MULEGRAPH_DEVICE` overrides logged when applied.

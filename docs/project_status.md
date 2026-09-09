@@ -45,7 +45,12 @@
 - **Cost warning for the `W` arithmetic:** `lc-cycle_len: 10` is superlinear in graph density. 4,000 edges over 400 nodes did not finish in 3 minutes; the same 4,000 edges over 3,000 nodes completed in seconds. Elliptic's per-timestep components are sparse so this should be safe, but the cycle bound must be timed on real data in gate 2 and treated as a tunable if it eats into `W`.
 - Probed hardware: **RTX 4060 Laptop GPU** present, so gates 2–4 are not blocked on BlueBEAR access.
 
-No dataset has been loaded and no model fitted yet. No fit timings recorded — gates 2–5 remain open.
+**9 Sep 2026 — Repository on GitHub with issue tracking**
+- `Abhinawap/mulegraph` (private) now holds `main`, `feature/gfp-backend-decision` and `feature/mvp-elliptic`.
+- Four GitHub Milestones with the spec's due dates (MVP 31 Oct, v1a 21 Nov, v1b 12 Dec, v2 13 Feb 2027) and **25 issues, one per §1.3 milestone deliverable**, each listing its PR-* ids, done-criteria and the integrity constraints that apply. Five MVP deliverables already delivered are closed citing their commits (#2–#6); #25 is a closed "not planned" guard listing every Later / Not-in-scope item (NFR-5).
+- Three Claude Code commands keep GitHub and this file in step: `/issue` (spec-aware create, refuses out-of-scope), `/close-issue` (close with commit evidence, tick the line here), `/issues-sync` (report disagreements, past-due milestones, open gate/supervisor blockers).
+
+No dataset has been loaded through the pipeline end to end yet; `pipeline.py` is a stub (#7). No fit timings recorded on real data — gates 2–5 remain open (#1).
 
 ---
 
@@ -117,4 +122,4 @@ Full table in spec §1.6. Currently live:
 
 ## Update rule
 
-Revise this file at every milestone boundary and whenever a gate, blocker, or risk changes state. Move completed work into *What's been accomplished* with its date, and record the same event in [changelog.md](changelog.md). Keep this file about **now and next** — history belongs in the changelog.
+Revise this file at every milestone boundary and whenever a gate, blocker, or risk changes state. Run `/issues-sync` first: it reports where this file and the GitHub issues disagree. Move completed work into *What's been accomplished* with its date, and record the same event in [changelog.md](changelog.md). Keep this file about **now and next** — history belongs in the changelog.

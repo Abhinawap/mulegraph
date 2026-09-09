@@ -86,6 +86,7 @@ Deliberately absent: frontend, HTTP API, database server, cloud services, LLMs.
 - Run `ruff check .` and `pytest` before pushing. NEVER force push to `main`.
 - Commit messages describe the change and, where relevant, the requirement ID it satisfies (e.g. `PR-F2`).
 - Keep commits focused on single changes.
+- Work is tracked as GitHub issues, one per spec §1.3 milestone deliverable, on GitHub Milestones `MVP`/`v1a`/`v1b`/`v2`. Use `/issue <id|text>` to add one (it refuses Later/Not-in-scope items, NFR-5), `/close-issue <n> <sha>` to close with evidence, and `/issues-sync` to catch drift between issues and `docs/project_status.md`.
 
 ## Commands
 
