@@ -8,7 +8,28 @@ Add a dated entry for every milestone tag and every change that alters behaviour
 
 ## Unreleased
 
-Nothing yet. Next entry will be the Python package skeleton and the week-1 timing results.
+Next entry will be the Python package skeleton and the remaining week-1 timing results (gates 2–5).
+
+---
+
+## 9 Sep 2026 — Week-1 gate 1: GFP backend confirmed
+
+### Decided
+- **Feature backend is IBM `snapml` GraphFeaturePreprocessor, not the `igraph` fallback.** `snapml==1.17.2` installs from a wheel on Python 3.11 / linux x86_64 with no build step. The spec §1.6 risk "GFP does not install or is unmaintained" is retired, and the fallback path in PR-F1 is now a contingency that is not being built.
+- `lc-cycle_len` stays at the spec's bound of 10 for now, but is flagged as a tunable pending real-data timing in gate 2 (see below).
+
+### Verified
+- `GraphFeaturePreprocessor` natively provides every feature family in PR-F1: `fan`, `degree`, `scatter-gather`, `lc-cycle` (`lc-cycle_len` default 10), `temp-cycle`, `vertex_stats`, each with an independent `_tw` time window — so the per-dataset window configuration in spec §2.5 maps onto the API without wrapping.
+- Output is deterministic across repeated runs and across thread counts (1 vs 12), satisfying NFR-1 for the feature stage.
+
+### Constraint discovered (affects PR-F2)
+- **GFP is causal only by usage, not by construction.** The preprocessor is stateful: `partial_fit` accumulates the graph, `transform` reads accumulated state. Ingesting the full edge table before transforming leaks future edges into past rows — demonstrated on a toy fixture where a *t1* transaction acquired neighbour amount statistics produced by a *t2* edge.
+- Consequence: `mulegraph/features/` MUST drive GFP strictly in time order, one batch at a time (`partial_fit(batch_t)` then `transform(batch_t)`), and must never fit globally before transforming. PR-F2 is therefore an implementation constraint on the feature builder, not merely a configuration setting, and the synthetic multi-timestep causality fixture is the test that guards it.
+
+### Notes
+- `lc-cycle` cost is superlinear in graph density: 4,000 edges over 400 nodes did not complete in 3 minutes, while the same edge count over 3,000 nodes finished in seconds. Elliptic's per-timestep components are sparse, but the cycle bound must be timed on real data before `W` is fixed.
+- Local RTX 4060 Laptop GPU confirmed available, so the remaining week-1 timing gates are not blocked on BlueBEAR access.
+- Repository remains pre-code; this gate was cleared in a throwaway virtualenv, and no dependency has been pinned into the project yet.
 
 ---
 
