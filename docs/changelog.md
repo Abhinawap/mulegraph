@@ -8,7 +8,10 @@ Add a dated entry for every milestone tag and every change that alters behaviour
 
 ## Unreleased
 
-Nothing yet. Next entry will be the Python package skeleton and the week-1 timing results.
+### Added
+- `CLAUDE.md` — **Agent tooling (ponytail)** policy under Constraints & Policies: the skill pack is optional and installed per-developer (never committed, so no `mulegraph` result depends on it and NFR-1 is unaffected); its minimalism ladder is scoped to implementation and explicitly cannot override PR-*, D*, or NFR-* requirements; per-subsystem modes recorded (`full` for plumbing, `lite` for `splits/`/`features/`/`eval/`, never `ultra`, never `third_party/`); `/ponytail-review` ordered after the `integrity-auditor` agent, which keeps the veto.
+
+Next entry will be the Python package skeleton and the week-1 timing results.
 
 ---
 

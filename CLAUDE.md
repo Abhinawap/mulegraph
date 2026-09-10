@@ -76,6 +76,12 @@ Deliberately absent: frontend, HTTP API, database server, cloud services, LLMs.
 - Benchmark code freezes before Christmas 2026. Unfinished v1b work is cut, not carried.
 - If asked to add something outside the current milestone, say so before building it.
 
+**Agent tooling (ponytail):**
+- Optional. Install per-developer, not committed: `/plugin marketplace add DietrichGebert/ponytail` then `/plugin install ponytail@ponytail`. Nothing in `mulegraph` may depend on it, so NFR-1 is unaffected.
+- Its decision ladder applies to implementation only, NEVER to this section. PR-*, D*, and NFR-* requirements are the spec: "simpler" is not a reason to drop a leakage assertion, a seed interval, a cache key, or a required unit test.
+- Modes: `full` for `cli.py`, `data/`, `report/` and plumbing; `lite` for `splits/`, `features/`, `eval/`, where the spec dictates structure; never `ultra`; never on `third_party/`, which stays unmodified for citation.
+- `/ponytail-review` runs *after* the `integrity-auditor` agent, never instead of it — the auditor has the veto. Feed `/ponytail-debt` into the `docs/project_status.md` checklist at each milestone boundary.
+
 **Secrets & data:**
 - NEVER commit `.env`, `data/`, or `mlruns/`.
 - Datasets are public and pseudonymous or synthetic. No personal data, no real bank data.
