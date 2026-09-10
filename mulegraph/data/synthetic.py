@@ -1,18 +1,4 @@
-"""A synthetic Elliptic-shaped graph.
-
-Two jobs, both of which the real dataset cannot do:
-
-* **Smoke test.** CI cannot download Elliptic++, so ``mulegraph smoke`` runs the
-  whole pipeline on a graph generated here.
-* **Feature causality (PR-F2).** On Elliptic the causality property holds
-  trivially — timesteps are disconnected components, so there is nothing for a
-  feature to peek at. Proving the feature builder is causal needs a graph whose
-  edges genuinely span timesteps, which ``cross_time_edges=True`` produces.
-
-The planted signal is deliberately learnable: illicit nodes get both a shifted
-mean on some local features and a fan-in star, so a smoke run exercises the
-local-feature and graph-feature paths without either being degenerate.
-"""
+"""Synthetic Elliptic-shaped graph for smoke runs and the PR-F2 causality fixture."""
 
 from __future__ import annotations
 
@@ -30,11 +16,9 @@ from mulegraph.types import (
 N_LOCAL = 93
 N_AGG1HOP = 72
 
-#: Local features whose mean is shifted for illicit nodes.
+#: Planted signal: illicit nodes get a shifted mean on some local features and a fan-in star.
 SIGNAL_COLUMNS = 10
 SIGNAL_SHIFT = 1.2
-
-#: In-edges planted on an illicit node's fan-in star.
 STAR_MIN_SOURCES = 3
 STAR_MAX_SOURCES = 6
 
@@ -52,23 +36,7 @@ def make_synthetic_elliptic(
     seed: int = 0,
     version: str = "synthetic",
 ) -> GraphDataset:
-    """Build a deterministic Elliptic-shaped ``GraphDataset``.
-
-    Args:
-        n_nodes: Total nodes, spread evenly over ``n_timesteps``.
-        illicit_rate: Fraction of *labelled* nodes that are illicit.
-        unknown_rate: Fraction of all nodes left unlabelled (``y == -1``). These
-            stay in the graph for message passing but never enter a loss or metric.
-        cross_time_edges: When True, ``cross_time_fraction`` of edges run forward
-            in time by up to ``max_time_gap`` timesteps, and ``meta.cross_time_edges``
-            is set accordingly. An edge's time is that of its *later* endpoint, so
-            a node never has an incident edge predating its own appearance.
-        max_time_gap: Largest forward jump for a cross-time edge.
-
-    Returns:
-        A ``GraphDataset`` with ``feature_blocks`` matching Elliptic's
-        ``{"local": (0, 93), "agg1hop": (93, 165)}``.
-    """
+    """Deterministic graph; ``cross_time_edges`` makes edges span timesteps (PR-F2 fixture)."""
     if n_features < N_LOCAL:
         raise ValueError(f"n_features must be at least {N_LOCAL}, got {n_features}")
     rng = np.random.default_rng(seed)

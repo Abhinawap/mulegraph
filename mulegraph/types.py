@@ -1,13 +1,4 @@
-"""Shared data types.
-
-Every component depends only on this module; only ``pipeline.py`` imports across
-subsystems (see ``docs/architecture.md``). Arrays are NumPy throughout — only
-``models/sage.py`` converts to torch — which keeps the feature, split and eval
-code torch-free and halves peak memory on a small machine.
-
-Dataclasses are frozen and declare ``eq=False``: they hold NumPy arrays, for
-which ``==`` is elementwise and a generated ``__eq__`` would raise.
-"""
+"""Shared data types; every component depends only on this module. Arrays are NumPy throughout."""
 
 from __future__ import annotations
 
@@ -21,32 +12,25 @@ FeatureBlock = tuple[int, int]
 
 Task = Literal["node", "edge"]
 
-#: Label encoding used by every loader. ``-1`` means unlabelled, and unlabelled
-#: nodes stay in the graph for message passing but never enter a loss or a metric.
+#: ``-1`` nodes stay in the graph for message passing but never enter a loss or a metric.
 LABEL_ILLICIT = 1
 LABEL_LICIT = 0
 LABEL_UNKNOWN = -1
 
 
+# Dataclasses declare eq=False: they hold NumPy arrays, whose == is elementwise.
 @dataclass(frozen=True, eq=False)
 class DatasetMeta:
-    """Provenance and structure of a loaded dataset.
-
-    ``cross_time_edges`` is the property design decision D1 turns on: when it is
-    False the dataset's temporal split is inductive by construction and the
-    ``temporal_inductive`` regime is undefined rather than merely unusual.
-    """
+    """Provenance and structure of a loaded dataset; ``cross_time_edges`` drives D1."""
 
     dataset: str
     version: str
     cross_time_edges: bool
     source_url: str
-    #: e.g. Elliptic++ ``{"local": (0, 93), "agg1hop": (93, 165)}``. Exposed so
-    #: "base" selection is explicit and logged (PR-M7).
+    #: e.g. Elliptic++ ``{"local": (0, 93), "agg1hop": (93, 165)}`` (PR-M7).
     feature_blocks: dict[str, FeatureBlock]
     feature_names: list[str]
-    #: Raw columns deliberately excluded from ``x``, recorded so the exclusion is
-    #: auditable rather than invisible.
+    #: Raw columns excluded from ``x``, recorded so the exclusion is auditable.
     dropped_columns: list[str] = field(default_factory=list)
     num_timesteps: int = 0
     label_counts: dict[str, int] = field(default_factory=dict)
@@ -61,11 +45,7 @@ class DatasetMeta:
 
 @dataclass(frozen=True, eq=False)
 class GraphDataset:
-    """A time-stamped graph with labels.
-
-    Node ``i`` is row ``i`` of ``x`` throughout the package; ``node_ids`` keeps the
-    dataset's original identifiers for provenance only.
-    """
+    """A time-stamped graph with labels; node ``i`` is row ``i`` of ``x``."""
 
     x: np.ndarray  # float32 [N, F]
     edge_index: np.ndarray  # int64 [2, E]; row 0 source, row 1 target
@@ -135,12 +115,7 @@ class GraphDataset:
 
 @dataclass(frozen=True, eq=False)
 class FeatureMatrix:
-    """A feature table aligned to node order: row ``i`` is node ``i``.
-
-    ``feature_version`` is the sha256 prefix over the feature definition (list,
-    window config, backend, dataset version) and is logged with every run
-    (PR-F3). It is ``"none"`` for selections that add no computed features.
-    """
+    """Node-aligned feature table; ``feature_version`` is logged with every run (PR-F3)."""
 
     values: np.ndarray  # float32 [N, K]
     columns: list[str]
@@ -170,12 +145,7 @@ class FeatureMatrix:
 
 @dataclass(frozen=True, eq=False)
 class Split:
-    """Train/val/test node indices for one evaluation regime.
-
-    Indices are sorted, disjoint, and contain labelled nodes only. ``split_hash``
-    is logged with every run so a table can be traced to the exact partition that
-    produced it (PR-O1).
-    """
+    """Sorted, disjoint, labelled-only train/val/test indices; ``split_hash`` is logged (PR-O1)."""
 
     regime: str
     train: np.ndarray  # int64, sorted
@@ -217,15 +187,3 @@ class Predictions:
             raise ValueError("proba must lie in [0, 1]")
         if self.embeddings is not None and self.embeddings.shape[0] != n:
             raise ValueError(f"embeddings must have {n} rows, got {self.embeddings.shape[0]}")
-
-
-@dataclass(frozen=True, eq=False)
-class DriftSignal:
-    """One detector's verdict on one batch. Placeholder for v2 — nothing writes it yet."""
-
-    detector: str
-    batch_id: int
-    batch_unit: str
-    score: float
-    flagged: bool
-    threshold: float

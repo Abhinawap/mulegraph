@@ -1,1 +1,1 @@
-"""mulegraph.eval — see docs/architecture.md for this component's contract."""
+"""mulegraph.eval — contract in docs/project_spec.md §2."""

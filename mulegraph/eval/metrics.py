@@ -1,23 +1,4 @@
-"""Detection metrics (PR-E2, PR-E6).
-
-**Accuracy is not computed here, and asking for it is an error.** At Elliptic's
-class balance a model that flags nothing scores about 0.90, so accuracy measures
-the imbalance rather than the model; reporting it as a headline is out of scope
-for the whole project (PR-E6), and the cheapest way to keep it out of a table is
-to make it unavailable at the source.
-
-Two kinds of number live in this module and must not be confused:
-
-* **Curve metrics** — ``pr_auc``, ``roc_auc``, ``p_at_r50``, ``p_at_r80`` — are
-  threshold-free. They summarise the ranking over every operating point.
-* **Point metrics** — ``f1``, ``precision``, ``recall`` — are read off one
-  operating point, the threshold chosen on *validation* by
-  ``mulegraph.eval.threshold.choose_threshold`` (PR-E4).
-
-``precision_at_recall`` is a curve metric despite naming a recall target: it
-walks the curve to the recall the target asks for. It has nothing to do with the
-deployed threshold and must never be used to pick one.
-"""
+"""Detection metrics (PR-E2); accuracy is refused at the source (PR-E6)."""
 
 from __future__ import annotations
 
@@ -33,12 +14,10 @@ from sklearn.metrics import (
     roc_auc_score,
 )
 
-#: The metrics `eval.metrics` may request, in the order tables report them.
+#: The metrics ``eval.metrics`` may request, in table order.
 ALL_METRICS = ("f1", "pr_auc", "roc_auc", "p_at_r50", "p_at_r80")
 
-#: Always returned alongside the requested metrics: they are what makes an F1
-#: readable (which side of the trade-off moved) and a group auditable (how many
-#: nodes, how many of them illicit).
+#: Always returned alongside the requested metrics.
 EXTRA_KEYS = ("precision", "recall", "n", "n_pos")
 
 
@@ -49,6 +28,7 @@ def _as_labels_and_scores(y: np.ndarray, p: np.ndarray) -> tuple[np.ndarray, np.
         raise ValueError(f"y has shape {y_arr.shape} but p has shape {p_arr.shape}")
     if y_arr.size == 0:
         raise ValueError("cannot compute metrics on an empty set")
+    # Unlabelled nodes never reach a metric.
     if (y_arr < 0).any():
         raise ValueError(
             f"{int((y_arr < 0).sum())} unlabelled nodes (y == -1) reached the evaluator; "
@@ -58,24 +38,7 @@ def _as_labels_and_scores(y: np.ndarray, p: np.ndarray) -> tuple[np.ndarray, np.
 
 
 def precision_at_recall(y: np.ndarray, p: np.ndarray, target_recall: float) -> float:
-    """Precision at the highest-threshold PR point whose recall reaches the target.
-
-    This is the operational question a fraud team actually asks: "if I insist on
-    catching half of it, how much of my alert queue is noise?" Walking down from
-    the highest threshold and stopping at the first point that reaches the target
-    recall gives the cleanest queue that still meets the requirement.
-
-    It is a *curve* metric, like PR-AUC. It does not use — and must not be
-    confused with — the decision threshold chosen on validation (PR-E4).
-
-    Args:
-        y: Labels, 1 illicit / 0 licit.
-        p: Scores, P(illicit).
-        target_recall: Recall to reach, in (0, 1].
-
-    Returns:
-        Precision at that point.
-    """
+    """Precision at the highest threshold reaching ``target_recall``; never picks a threshold."""
     if not 0.0 < target_recall <= 1.0:
         raise ValueError(f"target_recall must lie in (0, 1], got {target_recall}")
     y_arr, p_arr = _as_labels_and_scores(y, p)
@@ -102,24 +65,7 @@ def compute_metrics(
     which: Sequence[str] | None = None,
     prefix: str = "",
 ) -> dict[str, float]:
-    """Score one set of predictions at one operating point.
-
-    Args:
-        y: Labels, 1 illicit / 0 licit.
-        p: Scores, P(illicit).
-        threshold: The operating point, chosen on validation (PR-E4). Applied as
-            ``p >= threshold``.
-        which: Metrics to compute; defaults to all of :data:`ALL_METRICS`.
-        prefix: Prepended to every key, e.g. ``"test_"`` or ``"val_"``, so a run
-            can log both sets side by side.
-
-    Returns:
-        The requested metrics plus :data:`EXTRA_KEYS`, all prefixed.
-
-    Raises:
-        ValueError: On shape mismatch, unlabelled nodes, an empty set, or an
-            unknown metric name — including ``"accuracy"`` (PR-E6).
-    """
+    """Score ``p >= threshold`` (chosen on validation, PR-E4) plus :data:`EXTRA_KEYS`."""
     y_arr, p_arr = _as_labels_and_scores(y, p)
     names = list(ALL_METRICS if which is None else which)
     unknown = [n for n in names if n not in ALL_METRICS]

@@ -1,10 +1,4 @@
-"""Dataset loading and caching.
-
-Loaders are deterministic and cache to disk (PR-D4). The cache is keyed by
-``(dataset, version)``; anything derived from a *definition* — features, splits —
-is keyed by a content hash of that definition instead, so a definition change can
-never silently reuse a stale cache.
-"""
+"""Deterministic dataset loading, cached by ``(dataset, version)`` (PR-D4)."""
 
 from __future__ import annotations
 
@@ -24,7 +18,7 @@ CACHE_FILENAME = "graph.pt"
 
 
 def _load_elliptic(cfg: DatasetConfig, raw_dir: Path) -> GraphDataset:
-    # Imported lazily so the synthetic path never pays for pyarrow.
+    # Lazy, so the synthetic path never pays for pyarrow.
     from mulegraph.data.elliptic import load_elliptic_raw
 
     return load_elliptic_raw(raw_dir, cfg.version)
@@ -69,18 +63,7 @@ def _load_cache(path: Path) -> GraphDataset:
 def load_dataset(
     cfg: DatasetConfig, data_dir: Path, *, force: bool = False, use_cache: bool = True
 ) -> GraphDataset:
-    """Load a dataset, from cache when available.
-
-    Args:
-        cfg: Which dataset and version.
-        data_dir: Root holding ``raw/`` and ``cache/`` (``$MULEGRAPH_DATA_DIR``).
-        force: Rebuild from raw even if a cache exists.
-        use_cache: Set False to skip reading and writing the cache entirely.
-
-    Raises:
-        FileNotFoundError: If the raw files are absent; the message names the
-            expected path, because there is no auto-download in the MVP.
-    """
+    """Load a dataset from ``data_dir/cache``, or build it from ``data_dir/raw`` and cache it."""
     if cfg.name not in LOADERS:
         raise ValueError(f"Unknown dataset {cfg.name!r}; known: {sorted(LOADERS)}")
 
@@ -108,10 +91,7 @@ def load_dataset(
 
 
 def subsample(data: GraphDataset, node_idx: np.ndarray) -> GraphDataset:
-    """Induced subgraph on ``node_idx``, renumbering nodes to 0..k-1.
-
-    Used to build small fixtures; edges are kept only when both endpoints survive.
-    """
+    """Induced subgraph on ``node_idx``, renumbered to 0..k-1."""
     node_idx = np.unique(np.asarray(node_idx, dtype=np.int64))
     remap = np.full(data.num_nodes, -1, dtype=np.int64)
     remap[node_idx] = np.arange(node_idx.size, dtype=np.int64)

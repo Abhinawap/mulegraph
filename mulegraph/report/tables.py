@@ -1,22 +1,4 @@
-"""Results export: MLflow runs to the dissertation's per-config table (PR-O1, §2.3).
-
-The reporter is the reason "regenerable from a tagged commit" (NFR-1) is a
-property of the project rather than a promise. Nothing is recomputed here — the
-table is a *query* over what the runs recorded, so a number in the write-up can
-always be traced back to the run, split hash and commit that produced it.
-
-Two deliberate constraints:
-
-* **No import from ``mulegraph.eval``.** The interval is injected as a callable,
-  so the reporter depends on the shared types and MLflow only (the component
-  coupling rule in ``docs/architecture.md``). Swapping the interval definition is
-  then a caller's decision, visible in the ``ci_kind`` column.
-* **Provenance is checked, not assumed.** Rows that end up in the same table cell
-  are averaged as if they were repeats of one experiment. If their feature
-  version, split hash or commit differs, they are not, and the table would be
-  comparing two definitions while claiming to compare two seeds — so that case
-  warns loudly and the mixture is written into the cell rather than hidden.
-"""
+"""Results table: MLflow child runs -> per-config CSV + wide Markdown (PR-O1, spec §2.3)."""
 
 from __future__ import annotations
 
@@ -29,8 +11,7 @@ import pandas as pd
 
 log = logging.getLogger("mulegraph")
 
-#: The interval kind this table reports. Literal per spec §2.3; a bootstrap over
-#: test ids is a per-timestep band and never appears in this column (PR-E3).
+#: Bootstrap bands are per-timestep only and never appear in this column (PR-E3).
 CI_KIND = "seed_t"
 
 #: Exactly the spec's per-config export columns, in order.
@@ -53,39 +34,28 @@ CSV_COLUMNS = [
 GROUP_FIELDS = ("dataset", "regime", "model", "features")
 PROVENANCE_FIELDS = ("feature_version", "split_hash", "commit")
 
-#: Where each field may have been logged. The MLflow schema in §2.3 names some of
-#: these differently from the export columns, so the lookup is by alias rather
-#: than by an exact key the pipeline would have to remember to match.
-_ALIASES: dict[str, tuple[str, ...]] = {
-    "dataset": ("dataset", "dataset_name"),
-    "regime": ("regime", "split_regime"),
-    "model": ("model", "model_name"),
-    "features": ("features", "feature_set"),
-    "feature_version": ("feature_version",),
-    "split_hash": ("split_hash",),
-    "commit": ("commit", "git_commit"),
-}
+#: Run tag behind each export column where the names differ (spec §2.3 logs ``git_commit``).
+_TAG = {"commit": "git_commit"}
 
 #: Metric ordering for the tables; anything else follows, alphabetically.
 _METRIC_ORDER = ("test_f1", "test_pr_auc", "test_roc_auc", "test_p_at_r50", "test_p_at_r80")
 
-_MISSING = "unknown"
-
 
 def _field(runs: pd.DataFrame, field: str) -> pd.Series:
-    """Locate one logical field among MLflow's ``tags.``/``params.`` columns."""
-    for alias in _ALIASES[field]:
-        for column in (f"tags.{alias}", f"params.{alias}", alias):
-            if column in runs.columns:
-                return runs[column].astype("string").fillna(_MISSING)
-    return pd.Series([_MISSING] * len(runs), index=runs.index, dtype="string")
+    """One identity/provenance tag per run; a missing one is an error, never a guess (PR-O1)."""
+    tag = _TAG.get(field, field)
+    column = f"tags.{tag}"
+    if column not in runs.columns or runs[column].isna().any():
+        raise ValueError(
+            f"some child runs do not carry the {tag!r} tag; every run must log it (PR-O1), "
+            "and guessing would pool different regimes, configs or definitions into one cell"
+        )
+    return runs[column].astype("string")
 
 
 def _provenance_value(values: pd.Series, field: str, group: tuple[str, ...]) -> str:
-    """Collapse a provenance column over a group, warning if it is not constant."""
-    unique = sorted(set(values.dropna().tolist()))
-    if not unique:
-        return _MISSING
+    """Collapse a provenance column over a group, warning if it is not constant (NFR-1)."""
+    unique = sorted(set(values.tolist()))
     if len(unique) > 1:
         log.warning(
             "%s differs within %s: %s. These runs were produced from different "
@@ -133,26 +103,9 @@ def write_results_table(
     interval: Callable[[Sequence[float]], tuple[float, float, float]] | None = None,
     tracking_uri: str | None = None,
 ) -> Path:
-    """Aggregate an experiment's seed runs into the per-config results table.
-
-    Args:
-        experiment: MLflow experiment name; its child runs (one per seed) are read.
-        out_dir: Directory for ``<experiment>_results.csv`` and the wide Markdown
-            pivot beside it. Created if absent.
-        interval: ``values -> (mean, ci_low, ci_high)``. Defaults to
-            ``mulegraph.eval.intervals.seed_interval`` (the 95% across-seed
-            t-interval, PR-E3), imported lazily so ``report`` does not depend on
-            ``eval``.
-        tracking_uri: MLflow store; defaults to the ambient one.
-
-    Returns:
-        The path of the CSV written.
-
-    Raises:
-        ValueError: If the experiment has no child runs, or none of them logged a
-            ``test_*`` metric.
-    """
+    """Aggregate an experiment's seed runs into ``<experiment>_results.csv``; returns its path."""
     if interval is None:
+        # Injected rather than imported at module level: report depends on types only.
         from mulegraph.eval.intervals import seed_interval
 
         interval = seed_interval
@@ -168,7 +121,9 @@ def write_results_table(
             "metric; nothing to tabulate"
         )
 
-    frame = pd.DataFrame({field: _field(runs, field) for field in _ALIASES})
+    frame = pd.DataFrame(
+        {field: _field(runs, field) for field in (*GROUP_FIELDS, *PROVENANCE_FIELDS)}
+    )
     for column in metric_columns:
         frame[column] = pd.to_numeric(runs[column], errors="coerce")
 

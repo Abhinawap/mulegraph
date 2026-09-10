@@ -1,23 +1,4 @@
-"""Evaluation-regime split construction (PR-E1, D1).
-
-Three things distinguish this from a call to ``train_test_split``:
-
-* **Splits hold labelled nodes only.** Unlabelled nodes stay in the graph so
-  message passing still sees them, but they never enter a loss or a metric.
-* **Leakage assertions run on every build**, not only in tests. A split that
-  violates time ordering, overlaps, or leaves the validation set without a
-  positive is a broken experiment, and the failure must happen here rather than
-  surface as an unexplained metric later.
-* **``temporal_inductive`` is rejected where it is undefined (D1).** On a dataset
-  whose timestep components are disconnected, the temporal split is already
-  inductive; a separate "inductive" regime would be the same partition under a
-  different name, so the toolkit refuses it and says which dataset property
-  caused the refusal.
-
-The split seed is *not* a model seed: every model seed refits on the same
-partition, so the across-seed interval measures retraining variance and not
-partition variance (spec 2.5).
-"""
+"""Split construction: labelled nodes only, leakage assertions on every build (PR-E1, D1)."""
 
 from __future__ import annotations
 
@@ -47,13 +28,11 @@ def split_hash(train: np.ndarray, val: np.ndarray, test: np.ndarray, params: dic
 
 
 def _params(data: GraphDataset, cfg: RegimeConfig) -> dict[str, Any]:
-    """The regime-defining fields, so two different definitions can never collide."""
+    """The regime-defining fields; ``raw_sha256`` separates revisions sharing a version string."""
     params: dict[str, Any] = {
         "dataset": data.meta.dataset,
         "version": data.meta.version,
         "regime": cfg.regime,
-        # Two revisions carrying the same version string would otherwise produce
-        # indistinguishable params.json (PR-O1).
         "raw_sha256": data.meta.raw_sha256,
     }
     if cfg.regime == "random":
@@ -68,7 +47,7 @@ def _params(data: GraphDataset, cfg: RegimeConfig) -> dict[str, Any]:
 
 
 def _random_split(data: GraphDataset, cfg: RegimeConfig) -> tuple[np.ndarray, ...]:
-    """Stratified 70/15/15 (or configured) partition of the labelled nodes."""
+    """Stratified partition of the labelled nodes at the configured fractions."""
     idx = data.labelled_idx
     y = data.y[idx]
     train_frac, val_frac, test_frac = cfg.fractions
@@ -98,13 +77,7 @@ def _temporal_split(data: GraphDataset, cfg: RegimeConfig) -> tuple[np.ndarray, 
 def check_leakage(
     data: GraphDataset, regime: str, train: np.ndarray, val: np.ndarray, test: np.ndarray
 ) -> None:
-    """Assert the properties a usable split must have, naming any violation.
-
-    Raises:
-        ValueError: On an overlap, an unlabelled or empty part, a part without a
-            positive (which makes PR-AUC undefined and thresholding meaningless),
-            or, for temporal regimes, out-of-order times between parts.
-    """
+    """Raise on overlap, empty/unlabelled/positive-free parts, joining edges, or time disorder."""
     parts = {"train": train, "val": val, "test": test}
 
     for (a, left), (b, right) in (
@@ -135,10 +108,8 @@ def check_leakage(
             )
 
     if regime in TEMPORAL_REGIMES and data.meta.cross_time_edges:
-        # PR-E1's third assertion: no test id in any training neighbourhood. On a
-        # dataset whose timestep components are disconnected this is implied by the
-        # time ordering above, so it is checked only where an edge *can* join the
-        # two — otherwise it costs a pass over every edge to prove nothing.
+        # PR-E1: no test id in any training neighbourhood. Implied by time order when
+        # timestep components are disconnected, so only checked where an edge can join them.
         in_train = np.zeros(data.num_nodes, dtype=bool)
         in_test = np.zeros(data.num_nodes, dtype=bool)
         in_train[train] = True
@@ -164,13 +135,7 @@ def check_leakage(
 
 
 def definition_hash(params: dict[str, Any]) -> str:
-    """Hash of the split *definition*, used as the cache key.
-
-    Deliberately not ``split_hash``: that hashes the partition itself, so a
-    partition perturbed under an unchanged definition would land in a different
-    directory, miss the cache, and be written as a new entry — the determinism
-    comparison below could never fire (PR-D4).
-    """
+    """Cache key over the split *definition*, so a perturbed partition is caught (PR-D4)."""
     return hash_dict(params)
 
 
@@ -182,18 +147,7 @@ def _cache_paths(cache_dir: Path, digest: str) -> dict[str, Path]:
 
 
 def build_split(data: GraphDataset, cfg: RegimeConfig, cache_dir: Path) -> Split:
-    """Build (and cache) the partition for one regime.
-
-    The cache is a determinism check as much as a speed-up (PR-D4): on a hit the
-    stored arrays are compared against the freshly computed ones, so a change that
-    silently perturbs the partition under an unchanged definition is caught here.
-
-    Raises:
-        RegimeNotSupportedError: For ``temporal_inductive`` on a dataset without
-            cross-timestep edges (D1).
-        NotImplementedError: For ``temporal_inductive`` on a dataset that does have
-            them; that regime lands with AMLworld in v1b.
-    """
+    """Build, leak-check and cache one regime's partition; a cache hit checks determinism."""
     if cfg.regime == "temporal_inductive":
         if data.meta.cross_time_edges is False:
             raise RegimeNotSupportedError(

@@ -24,7 +24,7 @@ import logging
 import numpy as np
 import pytest
 
-from mulegraph.config import FeaturesConfig, WindowConfig
+from mulegraph.config import FeaturesConfig
 from mulegraph.features.builder import build_features
 from mulegraph.types import GraphDataset
 
@@ -39,7 +39,7 @@ CUTOFFS = (4, 7, 10)
 
 @pytest.fixture
 def causal_cfg(features_cfg: FeaturesConfig) -> FeaturesConfig:
-    return features_cfg.model_copy(update={"window": WindowConfig(default=WINDOW)})
+    return features_cfg.model_copy(update={"window": WINDOW})
 
 
 def _subgraph(data: GraphDataset, keep: np.ndarray) -> GraphDataset:

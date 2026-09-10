@@ -1,1 +1,1 @@
-"""mulegraph.report — see docs/architecture.md for this component's contract."""
+"""mulegraph.report — contract in docs/project_spec.md §2."""

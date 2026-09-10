@@ -10,9 +10,9 @@ overturning that under leakage-free evaluation is a result either way; nothing h
 toward the expected answer.
 
 See [`docs/project_spec.md`](docs/project_spec.md) for the full specification (requirements,
-design decisions D1–D4, requirement register), [`docs/architecture.md`](docs/architecture.md)
-for component contracts, and [`docs/project_status.md`](docs/project_status.md) for current
-milestone progress.
+design decisions D1–D4, requirement register; §2 for component contracts), and
+[`docs/project_status.md`](docs/project_status.md) for current milestone progress and verified
+method notes.
 
 ## Status
 

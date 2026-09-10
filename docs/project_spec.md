@@ -249,15 +249,15 @@ data/
 | `amt_in_sum`, `amt_out_sum`, `amt_in_mean`, `amt_out_mean` | float | AMLworld only |
 | ... | | full list generated from the feature config and stored in `feature_version.json` |
 
-**MLflow run schema (tags and params on every run)**
+**MLflow run schema (on every run; `git_commit` through `features` are tags — the reporter reads only tags and refuses a run missing one)**
 
 | Key | Example |
 |---|---|
 | `git_commit` | `a1b2c3d` |
 | `dataset`, `dataset_version` | `elliptic_pp`, `2023.1` |
 | `feature_version` | sha256 prefix |
-| `split_regime`, `split_hash` | `temporal_inductive`, sha256 prefix |
-| `model` | `xgb_gfp` |
+| `regime`, `split_hash` | `temporal`, sha256 prefix |
+| `model`, `features` | `xgb`, `base_gfp` |
 | `seed` | `3` |
 | `wallclock_cap_min`, `wallclock_used_min` | `120`, `117.4` |
 | `trial_ceiling`, `trials_completed`, `best_trial` | `40`, `31`, `17` |
@@ -299,7 +299,7 @@ The product has no HTTP API. Its interfaces are the CLI, the config schema, and 
 dataset: {name: elliptic_pp, version: "2023.1"}
 features:
   backend: gfp            # gfp | igraph
-  window: {default: 1, scatter_gather: 1}   # in timesteps for Elliptic++, hours for AMLworld
+  window: 1               # timesteps on Elliptic++; per-family windows (AMLworld 6h scatter-gather) return in v1b
   cycle_len: 10
 split:
   regime: temporal             # random | temporal | temporal_inductive (rejected if meta.cross_time_edges is False)
@@ -487,3 +487,4 @@ Stable IDs for the functional requirements described in Part 1. Later questions 
 - 0.4 (8 Sep 2026): Design decisions D1–D4 resolved: Elliptic modelled as transaction graph with two regimes and AMLworld moved to v1 for the three-regime contrast; search decoupled from seed loop with equal trial + wall-clock budget; two-by-two feature × model lineup plus reference PNA; label lag and lagged-label oracle in the simulator; injected typology-shift drift events on AMLworld.
 - 0.5 (8 Sep 2026): v1 split into v1a (Elliptic, 21 Nov) and v1b (AMLworld, 12 Dec, scope negotiable); PNA limited to one AMLworld regime with its own fallback ladder; AMLworld batch unit defined (one day) with label lag in batches; confidence intervals defined as seed-level t-intervals with paired-by-seed gaps, bootstrap restricted to per-timestep bands; stale Optuna-in-seed-loop text removed.
 - 0.6 (8 Sep 2026): Budget redefined as wall-clock only with per-model trial ceilings and a fixed trial-0 reference config (D2, PR-M6, config, MLflow schema, fallback ladder). "Base" features defined per dataset; Elliptic base = 93 local features, published 165 block kept as `xgb.raw165` reference (D3, PR-M7). AMLworld: span check in week one, separate drift split (3d/1d/rest) at 6-hour batches, hour-of-day-aligned reference, lag in batches (D4). Typology injection defined as edge deletion before T; feature detectors also scored on top-1% subset; AMLworld half of S3 recast as pre-registered hypothesis H1. Week-one HI-Small timing uses IBM's pipeline; MLflow logs cap/used/ceiling/completed; single HI-Medium rule in NFR-3.
+- 0.7 (10 Sep 2026): §2.4 config schema — `features.window` is a single int for the MVP; per-family windows (AMLworld's 6-hour scatter-gather) return with v1b. No behaviour change on Elliptic. §2.3 MLflow schema names the tags the reporter reads (`regime`, `model` + `features`) instead of `split_regime` / `xgb_gfp`.

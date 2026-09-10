@@ -226,3 +226,27 @@ def test_unknown_experiment_raises_a_clear_error(tmp_path: Path) -> None:
     uri = f"sqlite:///{tmp_path / 'mlflow.db'}"
     with pytest.raises(ValueError, match="never_created"):
         write_results_table("never_created", tmp_path / "tables", tracking_uri=uri)
+
+
+def test_missing_tag_raises_rather_than_pooling(tmp_path: Path) -> None:
+    """A run without its regime tag would silently merge regimes into one cell (PR-O1)."""
+    import mlflow
+
+    uri = f"sqlite:///{tmp_path / 'mlflow.db'}"
+    mlflow.set_tracking_uri(uri)
+    mlflow.set_experiment("untagged")
+    with mlflow.start_run():
+        mlflow.set_tags(
+            {
+                "kind": "child",
+                "dataset": "elliptic_pp",
+                "model": "xgb",
+                "features": "base",
+                "feature_version": "fv0123",
+                "split_hash": "sh4567",
+                "git_commit": "abc1234",
+            }
+        )
+        mlflow.log_metric("test_f1", 0.5)
+    with pytest.raises(ValueError, match="regime"):
+        write_results_table("untagged", tmp_path / "t", tracking_uri=uri)

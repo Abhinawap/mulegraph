@@ -1,1 +1,1 @@
-"""mulegraph.features — see docs/architecture.md for this component's contract."""
+"""mulegraph.features — contract in docs/project_spec.md §2."""

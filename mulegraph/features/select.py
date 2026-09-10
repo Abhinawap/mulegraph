@@ -1,19 +1,6 @@
-"""Resolve a config's ``features:`` selection into the matrix a model is fitted on.
+"""The one place ``base``/``base_gfp``/``raw165`` is resolved from ``meta.feature_blocks`` (PR-M7).
 
-This is the single place ``base`` / ``base_gfp`` / ``raw165`` is decided, and it
-exists to make PR-M7 mechanical. Elliptic's published 165-feature block is 93
-*local* transaction features followed by 72 *one-hop aggregated neighbour*
-features. If ``base`` reached even one of those 72 columns, the "does adding
-graph information help?" comparison would already contain graph information on
-both sides and the headline result of the dissertation would be meaningless.
-
-So no model ever slices ``data.x`` itself. Selection happens here, against the
-loader-declared ``meta.feature_blocks``, and the boundary between ``local`` and
-``agg1hop`` is asserted rather than assumed: if a loader ever declares blocks
-that overlap or leave a gap, :func:`select_features` raises instead of silently
-handing back 94 columns.
-
-Widths on Elliptic: ``base`` 93, ``base_gfp`` 93 + 36 = 129, ``raw165`` 165.
+Elliptic widths: ``base`` 93, ``base_gfp`` 93 + 36 = 129, ``raw165`` 165.
 """
 
 from __future__ import annotations
@@ -52,14 +39,7 @@ def _local_block(data: GraphDataset) -> tuple[int, int]:
 
 
 def select_features(data: GraphDataset, gfp: FeatureMatrix | None, selection: str) -> FeatureMatrix:
-    """Assemble the feature matrix named by ``selection``.
-
-    Args:
-        data: the loaded graph, whose ``meta.feature_blocks`` define the blocks.
-        gfp: causal graph features from :func:`mulegraph.features.builder.build_features`,
-            required for ``base_gfp`` and ignored otherwise.
-        selection: ``"base"`` | ``"base_gfp"`` | ``"raw165"``.
-    """
+    """Assemble the matrix named by ``selection``; ``gfp`` is required for ``base_gfp`` only."""
     names = data.meta.feature_names
 
     if selection in ("base", "base_gfp"):

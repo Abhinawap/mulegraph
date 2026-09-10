@@ -12,7 +12,6 @@ dependencies = [
     "typer==0.27.2",
     "pydantic==2.13.5",
     "pyyaml==6.0.3",
-    "python-dotenv==1.2.1",
     # Numerics and tabular
     "numpy==2.4.6",
     "pandas==3.0.5",
@@ -27,8 +26,7 @@ dependencies = [
     "pyg-lib==0.9.0+pt214cu130",
     # Graph features (week-1 gate 1: GFP is the backend, no igraph fallback)
     "snapml==1.17.2",
-    # Search and tracking
-    "optuna==5.0.0",
+    # Tracking (optuna returns with v1a search)
     "mlflow==3.16.0",
 ]
 

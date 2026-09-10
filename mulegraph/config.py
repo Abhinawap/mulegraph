@@ -1,14 +1,4 @@
-"""Experiment configuration.
-
-Every experiment is a YAML file under ``configs/``; there are no experiment
-parameters as CLI flags beyond ``--config``, so a result is always traceable to a
-file. Validation is strict (``extra="forbid"``): a typo in a key is an error, not
-a silently ignored setting.
-
-Some fields are accepted but not yet acted on (``eval.gap_pairs``,
-``search.wallclock_cap_minutes``). They are validated so a v1a config parses
-today and the schema does not churn.
-"""
+"""Experiment configuration: one strict (``extra="forbid"``) YAML file per experiment."""
 
 from __future__ import annotations
 
@@ -60,30 +50,16 @@ class DatasetConfig(Strict):
         return self
 
 
-class WindowConfig(Strict):
-    """Feature time windows, in the dataset's time unit (timesteps on Elliptic)."""
-
-    default: int = Field(1, ge=1)
-    scatter_gather: int | None = Field(None, ge=1)
-
-    def for_family(self, family: str) -> int:
-        if family == "scatter_gather" and self.scatter_gather is not None:
-            return self.scatter_gather
-        return self.default
-
-
 class FeaturesConfig(Strict):
     backend: Literal["gfp", "igraph"] = "gfp"
     families: list[GfpFamily] = Field(
         default_factory=lambda: ["fan", "degree", "scatter_gather", "lc_cycle"]
     )
-    #: Pattern-histogram bin edges. Coarser than snapml's default 2..30 because a
-    #: 29-column histogram per family is mostly zeros on Elliptic's sparse timesteps.
+    #: Coarser than snapml's 2..30: finer bins are mostly zeros on Elliptic's sparse timesteps.
     bins: list[int] = Field(default_factory=lambda: [2, 4, 8, 16, 32])
-    window: WindowConfig = Field(default_factory=WindowConfig)
+    #: Time window for every family, in the dataset's time unit (timesteps on Elliptic).
+    window: int = Field(1, ge=1)
     cycle_len: int = Field(10, ge=2)
-    #: Per-vertex fan/degree/ratio. These are the scalar columns the spec's feature
-    #: table names; the histograms are IBM's published extras.
     vertex_stats: bool = True
     num_threads: int = Field(8, ge=1)
     aggregation: Literal["node_agg_v1"] = "node_agg_v1"
@@ -104,16 +80,14 @@ class FeaturesConfig(Strict):
 
 
 class RegimeConfig(Strict):
-    """One evaluation regime. ``temporal_inductive`` parses here but is rejected by
-    the split builder on datasets without cross-timestep edges (D1)."""
+    """One evaluation regime; ``temporal_inductive`` is rejected later by the split builder (D1)."""
 
     regime: Regime
     train_end: int | None = None
     val: tuple[int, int] | None = None
     test: tuple[int, int] | None = None
     fractions: tuple[float, float, float] = (0.7, 0.15, 0.15)
-    #: Seeds the random partition only. The model seed never changes the split:
-    #: every seed is refitted on the same partition (spec 2.5).
+    #: Seeds the random partition only; model seeds refit on the same partition (spec 2.5).
     seed: int = 0
 
     @model_validator(mode="after")
@@ -152,8 +126,7 @@ class SplitConfig(Strict):
 
 
 class SamplerConfig(Strict):
-    """Neighbour sampling for GNNs. ``full_batch`` needs no pyg-lib and is exact
-    on a graph this size, so it is the fallback when the sampler is unavailable."""
+    """GNN neighbour sampling; ``full_batch`` is exact and needs no pyg-lib."""
 
     kind: Literal["neighbor", "full_batch"] = "neighbor"
     fanout: list[int] = Field(default_factory=lambda: [15, 10])
@@ -186,27 +159,9 @@ class ModelConfig(Strict):
 
 
 class SearchConfig(Strict):
-    """Hyperparameter search (D2, PR-M6).
-
-    The MVP runs each model's fixed trial-0 reference configuration and no search:
-    ``W`` is not known until week-one gate 5 sets it, and a wall-clock budget that
-    is not yet measured cannot be applied equally. Enabling this is v1a.
-    """
+    """Hyperparameter search (D2, PR-M6) is v1a; the MVP fits trial 0 only."""
 
     enabled: bool = False
-    wallclock_cap_minutes: float | None = Field(None, gt=0)
-    trial_ceiling: dict[str, int] = Field(
-        default_factory=lambda: {"xgb": 40, "sage": 20, "pna": 10}
-    )
-    trial0: dict[str, str] = Field(
-        default_factory=lambda: {
-            "xgb": "xgboost_defaults",
-            "sage": "sage_default_2x64",
-            "pna": "ibm_multignn_published",
-        }
-    )
-    pruner: Literal["median"] = "median"
-    search_seed: int = 0
 
     @model_validator(mode="after")
     def _mvp_guard(self) -> SearchConfig:
@@ -223,30 +178,10 @@ class EvalConfig(Strict):
         default_factory=lambda: ["f1", "pr_auc", "roc_auc", "p_at_r50", "p_at_r80"]
     )
     seed_ci: Literal["t95"] = "t95"
-    #: Paired-by-seed gaps are v1a; accepted here so a v1a config validates today.
-    gap_pairs: list[tuple[str, str]] = Field(default_factory=list)
-    bootstrap_samples: int = Field(1000, ge=1)
-    per_timestep: bool = False
-
-    @model_validator(mode="after")
-    def _warn_unimplemented(self) -> EvalConfig:
-        if self.per_timestep:
-            log.warning("eval.per_timestep is v1a; per-timestep curves are not written in the MVP")
-        if self.gap_pairs:
-            log.warning("eval.gap_pairs is v1a; paired gaps are not computed in the MVP")
-        return self
 
 
 class MLflowConfig(Strict):
-    """Where runs are recorded.
-
-    A local SQLite file rather than MLflow's ``file:`` store: MLflow 3 refuses the
-    file store outright ("in maintenance mode and will not receive further
-    updates"), and a dissertation whose numbers must still regenerate from a
-    tagged commit in 2027 cannot rest on a backend that is being retired (NFR-1,
-    S5). SQLite keeps the spec's constraint that there is no database *server* —
-    it is one file under ``mlruns/`` — while staying on a supported path.
-    """
+    """Run tracking in a local SQLite file; MLflow 3 refuses the ``file:`` store (NFR-1)."""
 
     experiment: str
     tracking_uri: str | None = None
@@ -286,12 +221,7 @@ class RunConfig(Strict):
 
 
 def load_config(path: str | Path) -> RunConfig:
-    """Read and validate a YAML config, applying environment overrides.
-
-    ``MULEGRAPH_FEATURE_BACKEND`` and ``MULEGRAPH_DEVICE`` override the file so a
-    machine-specific setting need not be committed; both are logged when applied,
-    because an override that changes results silently would break provenance.
-    """
+    """Read and validate a YAML config; ``MULEGRAPH_FEATURE_BACKEND``/``_DEVICE`` override it."""
     path = Path(path)
     if not path.is_file():
         raise FileNotFoundError(f"Config not found: {path}")

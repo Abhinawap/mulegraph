@@ -1,8 +1,8 @@
 # Project Status
 
-**Last updated:** 9 Sep 2026
+**Last updated:** 10 Sep 2026
 **Current milestone:** MVP — due 31 Oct 2026 (52 days out)
-**Spec version:** 0.6
+**Spec version:** 0.7
 **Overall state:** Package foundation in place (types, config, CLI, synthetic fixture, CI). Component modules and the real loader are next.
 
 ---
@@ -67,6 +67,29 @@ In order. Each item blocks the ones below it.
 7. **XGBoost then GraphSAGE** behind the shared protocol (PR-M1–M3, PR-M5).
 8. **Evaluator and MLflow wiring** (PR-E2, PR-E4, PR-O1) — threshold on validation, metrics, run logging.
 9. **Draft the methods chapter.** Spec §1.6 mitigates "Christmas writing slips" by drafting it at MVP, not at Christmas. Do not defer this.
+
+---
+
+## Verified method notes
+
+Facts that constrain the code, verified on fixtures and kept here instead of in docstrings. Cite them in the methods chapter.
+
+- **GFP scoring is batch-static** (`features/gfp.py`, `features/aggregate.py`). `transform` inserts the whole batch before scoring any edge, so row order within a timestep is irrelevant and folding vertex-side histograms (fan/degree in/out) onto nodes by `max` is exact, not an approximation (across batches it keeps the largest window a node was seen in). Edge-pattern histograms (scatter-gather, cycles) are summed onto both endpoints: multiplicity is the signal.
+- **Edge ids must be globally unique.** snapml overwrites an edge whose id it has already seen, so per-batch ids would erase history; the builder passes the dataset's global edge index.
+- **`vs_*` columns are cumulative, not windowed.** snapml 1.17.2 ignores `vertex_stats_tw`, while pattern histograms respect their `_tw`. Still past-only (PR-F2) and invisible on Elliptic (no vertex recurs across timesteps), but it matters on AMLworld.
+- **Output layout is probed, not trusted.** `probe_layout` checks the arithmetic layout against a real `transform` on a toy batch, so a snapml upgrade that reorders or resizes columns fails loudly.
+- **Causality guard** (`node_agg_v1`): a batch at *t* writes only into nodes with `node_time >= t`. Vacuous on Elliptic, load-bearing on cross-time graphs. Nodes with no causal evidence keep a zero row.
+- **Elliptic++ extras are dropped** (`data/elliptic.py`, PR-M7). The 17 columns the ++ release adds, including graph-derived `in_txs_degree`/`out_txs_degree`, would put neighbourhood structure into `base`; they are recorded in `meta.dropped_columns`. pyarrow reads only the 167 kept columns, as float32, so the 695 MB CSV fits a 7 GB host.
+- **`edge_time` is the source node's timestep.** That is causal only because the loader refuses any cross-timestep edge.
+- **Threshold ties go to the higher threshold** (`eval/threshold.py`): same F1, fewer alerts.
+- **Two intervals, never pooled** (`eval/intervals.py`, PR-E3). The across-seed t-interval (n = 5; a normal interval would be ~⅓ too narrow) is the only basis for significance. A bootstrap over test ids is narrow regardless of training instability and is used only for per-timestep bands.
+- **`p_at_r*` are curve metrics.** They take the highest-threshold PR point that reaches the target recall (the cleanest alert queue that still catches that share) and never set the deployed threshold.
+- **Split seed ≠ model seed** (`splits/builder.py`). Every model seed refits on one fixed partition, so the interval measures retraining variance, not partition variance. The split cache doubles as a determinism check (PR-D4).
+- **SAGE** (`models/sage.py`) trains on the symmetrised graph, and inference is always full-batch (exact at 203k nodes). CUDA scatter reductions are not bitwise deterministic; the seed interval covers that variation. Only `layers`/`hidden` come from the spec — the rest of `sage_default_2x64` is our choice, logged verbatim.
+- **XGBoost trial 0** is library defaults plus `n_estimators=1000` as an early-stopping ceiling. `scale_pos_weight` comes from the train split only. xgboost ≥ 2 takes `early_stopping_rounds` on the constructor, which is why trial 0 carries it.
+- **Trial 0 is merged in each model's constructor** (`XGBModel`, `SAGEModel`); config `params` override it. With no search in the MVP, runs must log `trials_completed = 0` and `trial0_source` — an honest zero, not a nominal 1 (D2).
+- **`val_f1` from `choose_threshold`** is a selection diagnostic, never a headline metric; it is logged so a val/test disagreement is visible.
+- **SAGE inference is full-batch** so sampling noise stays out of both the reported metric and the early-stopping signal.
 
 ---
 

@@ -11,7 +11,6 @@ from pathlib import Path
 
 import numpy as np
 import pytest
-from optuna.trial import FixedTrial
 
 from mulegraph.eval.metrics import compute_metrics
 from mulegraph.models.base import FitInfo
@@ -125,38 +124,6 @@ def test_trial0_is_the_fixed_reference_config() -> None:
     assert params == {"n_estimators": 1000, "early_stopping_rounds": 50}
 
 
-def test_search_space_works_with_a_fixed_trial() -> None:
-    chosen = {
-        "max_depth": 5,
-        "learning_rate": 0.1,
-        "subsample": 0.8,
-        "colsample_bytree": 0.7,
-        "min_child_weight": 3,
-    }
-    assert XGBModel.search_space(FixedTrial(chosen)) == chosen
-
-
-def test_search_space_matches_the_spec_bounds() -> None:
-    """Spec §2.5: depth 3-10, lr log-uniform 1e-2..0.3, subsample/colsample 0.5..1, mcw 1-10."""
-    trial = FixedTrial(
-        {
-            "max_depth": 3,
-            "learning_rate": 1e-2,
-            "subsample": 0.5,
-            "colsample_bytree": 0.5,
-            "min_child_weight": 1,
-        }
-    )
-    XGBModel.search_space(trial)
-    dists = trial.distributions
-    assert (dists["max_depth"].low, dists["max_depth"].high) == (3, 10)
-    assert (dists["min_child_weight"].low, dists["min_child_weight"].high) == (1, 10)
-    assert dists["learning_rate"].log is True
-    assert (dists["learning_rate"].low, dists["learning_rate"].high) == (1e-2, 0.3)
-    for name in ("subsample", "colsample_bytree"):
-        assert (dists[name].low, dists[name].high) == (0.5, 1.0)
-
-
 def test_fit_rejects_an_unlabelled_node_in_train(synthetic_ds: GraphDataset) -> None:
     """check_train_labelled must fire before a -1 label is learned as a negative."""
     feats, split = make_feats(synthetic_ds), make_split(synthetic_ds)
@@ -189,3 +156,12 @@ def test_registry_constructor_signature_matches(synthetic_ds: GraphDataset) -> N
     model = get_model("xgb", params=FAST_PARAMS, device="cpu")
     assert isinstance(model, XGBModel)
     assert model.name == "xgb"
+
+
+def test_trial0_is_applied_under_config_overrides() -> None:
+    """D2: trial 0 is the base every run starts from; config params win over it."""
+    from mulegraph.models import get_model
+
+    assert get_model("xgb", params={}).params["early_stopping_rounds"] == 50
+    model = get_model("xgb", params={"n_estimators": 20})
+    assert model.params == {"n_estimators": 20, "early_stopping_rounds": 50}

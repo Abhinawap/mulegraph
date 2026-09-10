@@ -12,7 +12,7 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from mulegraph.config import FeaturesConfig, WindowConfig
+from mulegraph.config import FeaturesConfig
 from mulegraph.features.aggregate import empty_node_features, node_agg_v1, node_columns
 from mulegraph.features.builder import build_features
 from mulegraph.features.gfp import (
@@ -220,7 +220,7 @@ def test_window_bounds_how_far_back_a_batch_can_see(features_cfg: FeaturesConfig
 
     results = {}
     for window in (1, 2):
-        cfg = features_cfg.model_copy(update={"window": WindowConfig(default=window)})
+        cfg = features_cfg.model_copy(update={"window": window})
         layout = probe_layout(cfg)
         driver = GfpDriver(make_gfp_params(cfg), layout)
         driver.step(first)

@@ -12,25 +12,25 @@ MVP is done when `mulegraph run --config configs/elliptic_temporal.yaml` produce
 
 ## Architecture Overview
 
-Python CLI package. No server, no database, no UI. Everything is config-driven and cached to files keyed by content hash.
-
-> Status: repo is pre-code. Only `docs/`, `.env.example`, `.gitignore` exist. The layout below is the target — create modules as milestones require, not upfront.
+Python CLI package. No server, no database, no UI. Everything is config-driven and cached to files keyed by content hash. Modules land with the milestone that needs them — `drift/`, `policies/` and `third_party/` do not exist yet.
 
 ```
 mulegraph/
   cli.py            # Typer entry point: run / drift / simulate / report / smoke
+  config.py         # Pydantic schema for configs/*.yaml
   pipeline.py       # Orchestrator — the only module that knows all the others
-  types.py          # GraphDataset, Split, FeatureMatrix, Predictions, DriftSignal
+  types.py          # GraphDataset, Split, FeatureMatrix, Predictions
+  util.py           # Paths, hashing, seeding, provenance
   data/             # Loaders -> GraphDataset (timestamps preserved, cached)
-  features/         # Causal graph features via snapml GFP or igraph fallback
+  features/         # Causal graph features via snapml GFP
   splits/           # random | temporal | temporal_inductive + leakage assertions
-  models/           # xgb, sage, pna behind one fit/predict_proba/embed protocol
-  eval/             # Thresholding, metrics, seed t-intervals, paired gaps
+  models/           # xgb, sage (pna v1b) behind one fit/predict_proba/embed protocol
+  eval/             # Thresholding, metrics, seed t-intervals (paired gaps v1a)
   drift/            # v2: PSI, KS, confidence shift, embedding MMD (label-free)
   policies/         # v2: retraining policy replay under label lag
   report/           # MLflow -> CSV tables + PNG figures
 configs/            # One YAML per experiment; validated with Pydantic
-third_party/        # Vendored IBM Multi-GNN (PNA, GIN+EU)
+third_party/        # v1b: vendored IBM Multi-GNN (PNA, GIN+EU)
 tests/
 docs/
 ```
@@ -41,7 +41,7 @@ docs/
 
 ## Tech Stack
 
-Python 3.11 · Typer · Pydantic · PyTorch 2.x + PyTorch Geometric · XGBoost 3.2 (newest supporting 3.11) · scikit-learn · Optuna · MLflow (local SQLite file; the `file:` store is refused by MLflow 3) · evidently · pyarrow/Parquet · pytest · ruff · uv
+Python 3.11 · Typer · Pydantic · PyTorch 2.x + PyTorch Geometric · XGBoost 3.2 (newest supporting 3.11) · scikit-learn · MLflow (local SQLite file; the `file:` store is refused by MLflow 3) · pyarrow/Parquet · pytest · ruff · uv. Optuna lands with v1a, evidently with v2 — not before.
 
 Deliberately absent: frontend, HTTP API, database server, cloud services, LLMs.
 
@@ -79,6 +79,15 @@ Deliberately absent: frontend, HTTP API, database server, cloud services, LLMs.
 **Secrets & data:**
 - NEVER commit `.env`, `data/`, or `mlruns/`.
 - Datasets are public and pseudonymous or synthetic. No personal data, no real bank data.
+
+## Building (ponytail)
+
+All code is written under the **ponytail** skill (`/ponytail`, full level). Before writing anything, climb the ladder and stop at the first rung that holds: does it need to exist → already in this repo → stdlib → an installed dependency → one line → the minimum code that works.
+
+- **Current milestone only.** Config keys, protocol methods, types, modules and dependencies for v1a/v1b/v2 land with that milestone, not before (NFR-5). No accepted-but-ignored config fields, no unreachable branches kept "as a home" for later work.
+- **Docstrings are one line** plus the requirement id. Rationale lives in the spec, `docs/project_status.md` → *Verified method notes*, or the methods chapter.
+- **Integrity overrides ponytail.** Never simplify away leakage assertions, threshold-on-validation, causality guards, shape/dtype validation at type boundaries, or an error message that says why.
+- Run `/ponytail-review` on the diff before committing; run `/ponytail-audit` at each milestone boundary.
 
 ## Repository Etiquette
 
@@ -124,9 +133,8 @@ Required unit tests (NFR-2):
 
 ## Documentation
 
-- [Project Spec](docs/project_spec.md) — requirements, design decisions D1–D4, requirement register (PR-*). **Source of truth; read before changing behaviour.**
-- [Architecture](docs/architecture.md) — component contracts and data flow
-- [Project Status](docs/project_status.md) — current milestone progress and blockers
+- [Project Spec](docs/project_spec.md) — requirements, design decisions D1–D4, requirement register (PR-*); §2 holds component contracts and data flow. **Source of truth; read before changing behaviour.**
+- [Project Status](docs/project_status.md) — current milestone progress, blockers, verified method notes
 - [Changelog](docs/changelog.md) — version history
 
 ## Maintaining This File
@@ -136,7 +144,7 @@ Keep this file short — it loads into every session. Details belong in `docs/`.
 Update it when:
 - A milestone completes → change **Current milestone** and its done-criteria
 - A design decision changes in the spec → update **Constraints & Policies** to match
-- The package layout changes → update **Architecture Overview** and drop the pre-code status note
+- The package layout changes → update **Architecture Overview**
 - A command or workflow changes → update **Commands**
 
 Update `docs/project_status.md` and `docs/changelog.md` alongside code at every milestone and major addition.

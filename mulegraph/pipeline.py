@@ -1,8 +1,4 @@
-"""Orchestrator — the only module that imports across subsystems.
-
-Filled in at integration (Stage 2 of the MVP plan); the foundation commit ships
-the interfaces the component streams build against.
-"""
+"""Orchestrator — the only module that imports across subsystems."""
 
 from __future__ import annotations
 

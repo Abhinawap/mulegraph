@@ -14,9 +14,7 @@ features:
   backend: gfp                      # igraph fallback retired in week-1 gate 1
   families: [fan, degree, scatter_gather, lc_cycle]
   bins: [2, 4, 8, 16, 32]
-  window:
-    default: 1                      # one timestep; Elliptic timesteps are disconnected
-    scatter_gather: 1
+  window: 1                         # one timestep; Elliptic timesteps are disconnected
   cycle_len: 10
   vertex_stats: true                # per-vertex fan / degree / ratio
   num_threads: 8
@@ -45,8 +43,6 @@ models:
 
 search:
   enabled: false                    # v1a; W is set by week-one gate 5
-  trial_ceiling: {xgb: 40, sage: 20}
-  search_seed: 0
 
 seeds: [0, 1, 2, 3, 4]
 

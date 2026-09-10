@@ -1,23 +1,5 @@
-"""Elliptic++ transaction-graph loader (PR-D1, PR-D4, PR-M7).
-
-Nodes are transactions, edges are Bitcoin flows between them, and every node
-carries a timestep 1..49. The 49 timestep components are disconnected, which is
-the property design decision D1 turns on: ``meta.cross_time_edges`` is *computed*
-here rather than asserted by fiat, and the split builder reads it to reject
-``temporal_inductive``.
-
-Two things about this loader are load-bearing for the benchmark's defensibility:
-
-* **Only the 165 published features enter ``x``.** The Elliptic++ release adds 17
-  columns of its own, two of which (``in_txs_degree``, ``out_txs_degree``) are
-  graph-derived. Keeping them would put neighbourhood structure into the ``base``
-  row and quietly answer the question the whole benchmark asks — do graph
-  features beat local ones (PR-M7). They are dropped and recorded in
-  ``meta.dropped_columns`` so the exclusion is auditable.
-* **Memory.** ``txs_features.csv`` is 695 MB of text on a 7 GB machine. pyarrow
-  reads only the 167 needed columns, converting to float32/int64 during the parse,
-  so the 184-column float64 table is never materialised.
-"""
+"""Elliptic++ transaction-graph loader (PR-D1, PR-D4). ``x`` is exactly the 165 published
+features; Elliptic++'s own 17 extras are dropped and recorded (PR-M7)."""
 
 from __future__ import annotations
 
@@ -25,6 +7,7 @@ import logging
 from pathlib import Path
 
 import numpy as np
+import pandas as pd
 import pyarrow as pa
 import pyarrow.csv as pv
 
@@ -51,15 +34,12 @@ N_AGG1HOP = 72
 ID_COLUMN = "txId"
 TIME_COLUMN = "Time step"
 
-#: The published 165-feature block, in file order: 93 local then 72 one-hop
-#: aggregates. ``base`` is the first block only; ``raw165`` is both (D3, PR-M7).
+#: Published order: 93 local then 72 one-hop aggregates. ``base`` is the first block (D3, PR-M7).
 LOCAL_COLUMNS = [f"Local_feature_{i + 1}" for i in range(N_LOCAL)]
 AGG_COLUMNS = [f"Aggregate_feature_{i + 1}" for i in range(N_AGG1HOP)]
 FEATURE_COLUMNS = LOCAL_COLUMNS + AGG_COLUMNS
 
-#: Elliptic++ extras. ``in_txs_degree`` / ``out_txs_degree`` are read off the
-#: graph and would contaminate the base-vs-GFP contrast; the rest are transaction
-#: metadata outside the published feature definition. All are dropped (PR-M7).
+#: Elliptic++ extras; the two degree columns are graph-derived and would contaminate ``base``.
 EXTRA_COLUMNS = [
     "in_txs_degree",
     "out_txs_degree",
@@ -83,8 +63,7 @@ EXTRA_COLUMNS = [
 #: Raw ``class`` encoding -> the package-wide label encoding.
 CLASS_MAP = {1: LABEL_ILLICIT, 2: LABEL_LICIT, 3: LABEL_UNKNOWN}
 
-#: Expected shape of release 2023.1. A mismatch means a different revision, which
-#: must fail loudly rather than silently produce numbers that cannot be compared.
+#: Published counts per release; a mismatch means a different revision and must fail loudly.
 EXPECTED = {
     "2023.1": {
         "num_nodes": 203_769,
@@ -109,19 +88,12 @@ def _require_files(raw_dir: Path) -> list[Path]:
 
 
 def _read_header(path: Path) -> list[str]:
-    """Column names only, so the dropped-column record can be derived from the file."""
     with open(path) as fh:
         return fh.readline().rstrip("\n").split(",")
 
 
 def _read_features(path: Path) -> tuple[np.ndarray, np.ndarray, np.ndarray, list[str]]:
-    """Return ``(node_ids, node_time, x, dropped)`` reading only the 167 columns we keep.
-
-    ``include_columns`` also fixes the output order, so ``x``'s columns are the
-    published order regardless of how the file is laid out. ``dropped`` is derived
-    from the header rather than hard-coded, so a revision that adds an eighteenth
-    extra column is still reported accurately in ``meta.dropped_columns`` (PR-M7).
-    """
+    """Return ``(node_ids, node_time, x, dropped)``; ``dropped`` comes from the header (PR-M7)."""
     wanted = [ID_COLUMN, TIME_COLUMN, *FEATURE_COLUMNS]
     header = _read_header(path)
     dropped = [name for name in header if name not in set(wanted)]
@@ -134,6 +106,7 @@ def _read_features(path: Path) -> tuple[np.ndarray, np.ndarray, np.ndarray, list
             len(unexpected),
             unexpected,
         )
+    # Read only the 167 needed columns, typed during the parse: the file is 695 MB of text.
     column_types = {ID_COLUMN: pa.int64(), TIME_COLUMN: pa.int64()} | dict.fromkeys(
         FEATURE_COLUMNS, pa.float32()
     )
@@ -155,8 +128,20 @@ def _read_features(path: Path) -> tuple[np.ndarray, np.ndarray, np.ndarray, list
     return node_ids, node_time, x, dropped
 
 
-def _read_labels(path: Path, node_ids: np.ndarray, order: np.ndarray) -> np.ndarray:
-    """Labels aligned to feature-file row order, mapped to the package encoding."""
+def _resolve_ids(ids: np.ndarray, index: pd.Index, source: str) -> np.ndarray:
+    """Map original txIds to node indices."""
+    rows = index.get_indexer(ids)
+    unresolved = rows < 0
+    if unresolved.any():
+        raise ValueError(
+            f"{source} references {int(unresolved.sum())} txIds absent from {FEATURES_FILE}, "
+            f"e.g. {ids[unresolved][:5].tolist()}"
+        )
+    return rows.astype(np.int64)
+
+
+def _read_labels(path: Path, index: pd.Index) -> np.ndarray:
+    """Labels aligned to feature-file row order, in the package encoding."""
     table = pv.read_csv(
         path,
         convert_options=pv.ConvertOptions(
@@ -175,30 +160,12 @@ def _read_labels(path: Path, node_ids: np.ndarray, order: np.ndarray) -> np.ndar
     for raw, label in CLASS_MAP.items():
         lut[raw] = label
 
-    rows = _resolve_ids(label_ids, node_ids, order, path.name)
-    y = np.full(node_ids.size, LABEL_UNKNOWN, dtype=np.int64)
-    y[rows] = lut[raw_class]
+    y = np.full(len(index), LABEL_UNKNOWN, dtype=np.int64)
+    y[_resolve_ids(label_ids, index, path.name)] = lut[raw_class]
     return y
 
 
-def _resolve_ids(
-    ids: np.ndarray, node_ids: np.ndarray, order: np.ndarray, source: str
-) -> np.ndarray:
-    """Map original txIds to node indices via a sorted-id binary search."""
-    sorted_ids = node_ids[order]
-    pos = np.searchsorted(sorted_ids, ids)
-    pos = np.clip(pos, 0, sorted_ids.size - 1)
-    rows = order[pos]
-    unresolved = node_ids[rows] != ids
-    if unresolved.any():
-        raise ValueError(
-            f"{source} references {int(unresolved.sum())} txIds absent from {FEATURES_FILE}, "
-            f"e.g. {ids[unresolved][:5].tolist()}"
-        )
-    return rows
-
-
-def _read_edges(path: Path, node_ids: np.ndarray, order: np.ndarray) -> np.ndarray:
+def _read_edges(path: Path, index: pd.Index) -> np.ndarray:
     table = pv.read_csv(
         path,
         convert_options=pv.ConvertOptions(
@@ -208,47 +175,31 @@ def _read_edges(path: Path, node_ids: np.ndarray, order: np.ndarray) -> np.ndarr
     )
     src_ids = table.column("txId1").to_numpy().astype(np.int64, copy=False)
     dst_ids = table.column("txId2").to_numpy().astype(np.int64, copy=False)
-    src = _resolve_ids(src_ids, node_ids, order, path.name)
-    dst = _resolve_ids(dst_ids, node_ids, order, path.name)
+    src = _resolve_ids(src_ids, index, path.name)
+    dst = _resolve_ids(dst_ids, index, path.name)
     return np.stack([src, dst]).astype(np.int64)
 
 
 def load_elliptic_raw(raw_dir: Path, version: str) -> GraphDataset:
-    """Load the Elliptic++ transaction graph from its three raw CSVs.
-
-    Args:
-        raw_dir: Directory holding ``txs_features.csv``, ``txs_classes.csv`` and
-            ``txs_edgelist.csv``.
-        version: Dataset release; ``"2023.1"`` additionally asserts the published
-            node, edge, timestep and label counts.
-
-    Returns:
-        A ``GraphDataset`` whose ``x`` is exactly the 165 published features, with
-        edges sorted by ``edge_time`` so downstream consumers see time-ordered
-        batches.
-
-    Raises:
-        FileNotFoundError: If any raw file is absent.
-        ValueError: If the observed counts contradict the declared version, an
-            edge endpoint does not resolve, or an edge crosses timesteps on 2023.1.
-    """
+    """Load the three raw CSVs; edges come back sorted by ``edge_time``."""
     raw_dir = Path(raw_dir)
     feature_path, class_path, edge_path = _require_files(raw_dir)
 
     node_ids, node_time, x, dropped = _read_features(feature_path)
-    # One sort of the ids serves both the label and the edge id lookups.
-    order = np.argsort(node_ids, kind="stable")
-    y = _read_labels(class_path, node_ids, order)
-    edge_index = _read_edges(edge_path, node_ids, order)
+    index = pd.Index(node_ids)
+    if not index.is_unique:
+        raise ValueError(
+            f"{FEATURES_FILE} lists {int(index.duplicated().sum())} duplicate txIds, so labels "
+            "and edges cannot be aligned to a single node"
+        )
+    y = _read_labels(class_path, index)
+    edge_index = _read_edges(edge_path, index)
 
     src, dst = edge_index[0], edge_index[1]
     cross_time_edges = bool((node_time[src] != node_time[dst]).any())
     if cross_time_edges:
-        # Checked unconditionally rather than inside the version check: edge_time
-        # below takes the source node's timestep, which is a causal timestamp only
-        # while both endpoints share it. On a file with cross-timestep edges a
-        # downstream `edge_time <= t` filter would admit an edge whose destination
-        # lies in the future, quietly breaking PR-F2.
+        # edge_time below is the source's timestep, causal only while both endpoints share it;
+        # a cross-timestep edge would let an `edge_time <= t` filter admit the future (PR-F2).
         n_cross = int((node_time[src] != node_time[dst]).sum())
         raise ValueError(
             f"{edge_path.name} has {n_cross} of {edge_index.shape[1]} edges joining different "

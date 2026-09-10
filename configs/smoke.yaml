@@ -15,7 +15,7 @@ features:
   backend: gfp
   families: [fan, degree, scatter_gather, lc_cycle]
   bins: [2, 4, 8]
-  window: {default: 1}
+  window: 1
   cycle_len: 6                      # shorter bound: cycle cost grows with density
   vertex_stats: true
   num_threads: 2

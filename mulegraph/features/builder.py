@@ -1,17 +1,6 @@
-"""Build, version and cache causal graph features (PR-F1, PR-F2, PR-F3).
+"""Build, version and cache causal node-level graph features (PR-F1, PR-F2, PR-F3).
 
-One entry point, :func:`build_features`, which walks the graph forward one
-timestep at a time, drives GFP through :class:`~mulegraph.features.gfp.GfpDriver`
-(the only object allowed to touch snapml), folds each batch onto nodes with
-``node_agg_v1``, and caches the result under a hash of the *definition* rather
-than of the output.
-
-That hash, ``feature_version``, covers the backend and its version, the enabled
-families, bins, windows, cycle bound, vertex statistics, the aggregation name,
-the drive pattern, both column lists, and the dataset version. ``drive`` is in
-there deliberately: the batch-by-batch pattern is what makes the features causal,
-so a future change to it must invalidate every cache rather than quietly reuse
-numbers computed under the old one.
+The cache key ``feature_version`` hashes the full *definition*, including the drive pattern.
 """
 
 from __future__ import annotations
@@ -38,17 +27,12 @@ from mulegraph.util import Timer, hash_dict, write_json
 
 log = logging.getLogger("mulegraph")
 
-#: The drive pattern the cache key is bound to. See the module docstring.
+#: The causal drive pattern; in the hash so changing it invalidates every cache.
 DRIVE = "transform_only"
 
-#: A timestep slower than this gets a warning: ``lc-cycle`` cost is superlinear in
-#: density (4k edges over 400 nodes did not finish in 3 minutes during week-1
-#: gate 1, while the same 4k edges over 3k nodes took seconds), so a slow
-#: timestep is a signal to revisit ``cycle_len`` before it eats into W.
+#: lc-cycle cost is superlinear in density, so a slow timestep means revisit ``cycle_len``.
 SLOW_TIMESTEP_SECONDS = 60.0
 
-#: Prefix on every column of the returned matrix, so a joined table never has an
-#: ambiguous ``fan_in_bin2``.
 COLUMN_PREFIX = "gfp_"
 
 
@@ -68,10 +52,7 @@ def feature_definition(
         "snapml_version": snapml_version(),
         "families": list(cfg.families),
         "bins": list(cfg.bins),
-        "window": {
-            "default": cfg.window.default,
-            "scatter_gather": cfg.window.scatter_gather,
-        },
+        "window": cfg.window,
         "cycle_len": cfg.cycle_len,
         "vertex_stats": cfg.vertex_stats,
         "vertex_stats_feats": list(make_gfp_params(cfg)["vertex_stats_feats"]),  # type: ignore[arg-type]
@@ -81,6 +62,8 @@ def feature_definition(
         "node_columns": node_columns(layout),
         "dataset": meta.dataset,
         "dataset_version": meta.version,
+        # Same version string over different raw files must not share a cache (NFR-1).
+        "raw_sha256": meta.raw_sha256,
     }
 
 
@@ -90,11 +73,7 @@ def feature_version(cfg: FeaturesConfig, meta: DatasetMeta, layout: GfpLayout) -
 
 
 def _batch(edge_ids: np.ndarray, src: np.ndarray, dst: np.ndarray, t: int) -> np.ndarray:
-    """One timestep's edges as snapml's float64 input rows.
-
-    ``edge_ids`` are the dataset's global edge indices: snapml overwrites an edge
-    whose id it has seen before, so per-batch ids would erase history.
-    """
+    """One timestep's edges as snapml input rows; ``edge_ids`` must be globally unique."""
     batch = np.empty((edge_ids.size, RAW_WIDTH), dtype=np.float64)
     batch[:, 0] = edge_ids
     batch[:, 1] = src
@@ -156,18 +135,7 @@ def build_features(
     *,
     force: bool = False,
 ) -> FeatureMatrix:
-    """Compute causal node-level graph features, or load them from cache.
-
-    Args:
-        data: the graph. Only ``edge_index``, ``edge_time`` and ``node_time`` are
-            read; node features play no part.
-        cfg: feature configuration; ``backend`` must be ``"gfp"``.
-        cache_dir: dataset cache root; features land in ``<cache_dir>/features/``.
-        force: recompute and overwrite even when a cache entry exists.
-
-    Returns:
-        A ``FeatureMatrix`` with one row per node, aligned to node order.
-    """
+    """Causal node-level graph features in node order, from ``<cache_dir>/features/`` if cached."""
     if cfg.backend == "igraph":
         raise NotImplementedError(
             "igraph fallback is not built: snapml GFP installed in week-1 gate 1 (9 Sep 2026), "

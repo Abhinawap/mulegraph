@@ -8,6 +8,17 @@ Add a dated entry for every milestone tag and every change that alters behaviour
 
 ## Unreleased
 
+### 10 Sep 2026 — Ponytail audit: ahead-of-milestone scaffolding removed (NFR-5)
+- **Removed** v1a search scaffolding: `mulegraph/search.py`, `search_space` on every model and on the protocol, and every `SearchConfig` field except `enabled`. Each model now merges its `trial0()` reference config under the config's `params` in its own constructor (XGBoost previously relied on `search.py` for this; D2).
+- **Integrity-audit follow-ups:** the reporter raises when a child run lacks an identity or provenance tag instead of writing "unknown" (spec §2.3 now names the tags it reads: `regime`, `features`); XGBoost records `trial0_source` in its fit info; duplicate Elliptic++ txIds raise a one-sentence error; `feature_version` now also hashes `raw_sha256`.
+- **Removed** v1a/v2 placeholders: `types.DriftSignal`, the accepted-but-ignored `eval.gap_pairs` / `bootstrap_samples` / `per_timestep`, and the unused `util.log_stage`.
+- **Removed** dependencies `optuna` (returns with v1a) and `python-dotenv` (never imported).
+- **Removed** `docs/architecture.md`, which duplicated spec §2.
+- **Changed** `features.window` from a per-family mapping to one int (spec 0.7). **Every `feature_version` hash changes**, so existing feature caches are orphaned and recompute. No results had been logged.
+- **Simplified** the reporter's tag lookup (no alias table), Elliptic++ id resolution (`pd.Index.get_indexer`), and SAGE fan-out handling: a fan-out whose length differs from `layers` is now an error instead of being silently extended.
+- Module docstrings cut to one line plus requirement id. The verified findings they carried moved to `project_status.md` → *Verified method notes*.
+- `CLAUDE.md` gains a *Building (ponytail)* section: every change climbs the ponytail ladder, builds for the current milestone only, and never simplifies away an integrity guard.
+
 Next entry will be the component modules (loader, feature builder, splits, models, evaluator) and the remaining week-1 timing results (gates 2–5).
 
 ---

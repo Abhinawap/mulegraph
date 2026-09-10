@@ -1,28 +1,6 @@
-"""GraphSAGE node classifier (PR-M3).
+"""GraphSAGE node classifier behind the shared model protocol (PR-M3, PR-M5).
 
-The graph *model* half of the benchmark's central comparison: XGBoost on
-hand-built graph features versus a GNN that learns its own aggregation. Keeping
-this model behind the same ``fit``/``predict_proba`` protocol as XGBoost (PR-M5)
-is what makes the two rows comparable rather than merely adjacent in a table.
-
-Three decisions are worth stating because they are ours, not the spec's:
-
-* **Features come from ``feats.values``, never ``data.x``.** Feature selection
-  happens upstream, so ``base`` and ``base_gfp`` differ only in the matrix handed
-  to the model. Reading ``data.x`` here would silently give the GNN the
-  pre-aggregated neighbour block and destroy that comparison (PR-M7).
-* **Unlabelled nodes stay in the graph but never enter the loss.** Message
-  passing over the ``y == -1`` majority is the point of a GNN on Elliptic; a -1
-  reaching ``BCEWithLogitsLoss`` would be learned as a confident negative.
-* **Inference is always full-batch, even when training samples.** The graph is
-  small (203k nodes), full-batch inference is exact, and a sampled estimate would
-  put sampling noise into the reported metric and into the early-stopping signal.
-
-The spec fixes only "two ``SAGEConv`` layers, 64 hidden, class-weighted BCE"
-(spec 2.5). Everything else in :meth:`SAGEModel.trial0` — dropout, learning rate,
-weight decay, epoch cap, patience, symmetrisation — is our choice with no
-published source, so trial 0 is logged verbatim with every run and its name is
-``sage_default_2x64`` rather than a citation.
+Reads ``feats.values``, never ``data.x`` (PR-M7); inference is always full-batch.
 """
 
 from __future__ import annotations
@@ -40,10 +18,9 @@ from mulegraph.types import FeatureMatrix, GraphDataset, Split
 from mulegraph.util import Timer, log, seed_all
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
-    import optuna
     import torch
 
-#: Our reference configuration. Only ``layers``/``hidden`` come from the spec.
+#: Reference config. Only ``layers``/``hidden`` come from the spec; the rest is ours.
 TRIAL0: dict[str, Any] = {
     "hidden": 64,
     "layers": 2,
@@ -59,20 +36,16 @@ TRIAL0_SOURCE = "sage_default_2x64"
 
 @dataclass
 class _Graph:
-    """Torch views of one (dataset, feature matrix) pair, built once per fit.
+    """Device tensors for one (dataset, feature matrix) pair, built once per fit."""
 
-    Rebuilding these every epoch would dominate the epoch cost and, on a 7 GB
-    host, churn memory for no reason.
-    """
-
-    x: torch.Tensor  # float32 [N, K] on the model's device
-    edge_index: torch.Tensor  # int64 [2, E'] on the model's device, symmetrised
-    y: torch.Tensor  # float32 [N] on the model's device; -1 entries never used
+    x: torch.Tensor  # float32 [N, K]
+    edge_index: torch.Tensor  # int64 [2, E'], symmetrised if undirected
+    y: torch.Tensor  # float32 [N]; -1 entries never used
     key: tuple[int, int, int, int]
 
 
 def _build_net(in_dim: int, hidden: int, layers: int, dropout: float) -> torch.nn.Module:
-    """``SAGEConv -> ReLU -> Dropout`` stacked ``layers`` deep, then a linear head."""
+    """``SAGEConv -> ReLU -> Dropout`` x ``layers``, then a linear head."""
     import torch
     from torch_geometric.nn import SAGEConv
 
@@ -115,15 +88,8 @@ class SAGEModel:
         self._net: torch.nn.Module | None = None
         self._graph: _Graph | None = None
 
-    # ----------------------------------------------------------------- setup #
-
     def _prepare(self, data: GraphDataset, feats: FeatureMatrix) -> _Graph:
-        """Convert one (dataset, features) pair to device tensors, cached by identity.
-
-        The pipeline hands the same two objects to ``fit`` and then to every
-        ``predict_proba`` call, so identity is a sound cache key here; a miss only
-        costs a rebuild, never a wrong answer.
-        """
+        """Device tensors for (data, feats), cached by object identity."""
         import torch
 
         if feats.values.shape[0] != data.num_nodes:
@@ -137,10 +103,6 @@ class SAGEModel:
 
         edge_index = torch.from_numpy(np.ascontiguousarray(data.edge_index))
         if self.params["undirected"]:
-            # Elliptic's transaction graph is directed, but node classification on
-            # it is conventionally run on the symmetrised graph so a node sees its
-            # payers as well as its payees. The dataset is untouched; the choice is
-            # recorded in FitInfo.extra so it is auditable.
             from torch_geometric.utils import to_undirected
 
             edge_index = to_undirected(edge_index, num_nodes=data.num_nodes)
@@ -152,18 +114,6 @@ class SAGEModel:
         )
         self._graph = graph
         return graph
-
-    def _fanout(self) -> list[int]:
-        """One fan-out per message-passing layer, extending or truncating the config."""
-        layers = int(self.params["layers"])
-        fanout = list(self.sampler.fanout)
-        if len(fanout) < layers:
-            fanout = fanout + [fanout[-1]] * (layers - len(fanout))
-            log.info("sampler.fanout extended to %s to match layers=%d", fanout, layers)
-        elif len(fanout) > layers:
-            fanout = fanout[:layers]
-            log.info("sampler.fanout truncated to %s to match layers=%d", fanout, layers)
-        return fanout
 
     def _make_loader(self, graph: _Graph, train_idx: np.ndarray, num_nodes: int) -> Any:
         import torch
@@ -177,8 +127,13 @@ class SAGEModel:
                 "importable here; set sampler: {kind: full_batch} in the config (exact, and "
                 "affordable on a graph this size) or install pyg-lib for your torch build"
             )
-        # The loader samples on CPU and each batch is moved to the device; keeping
-        # the sampling graph on CPU is also what lets an 8 GB card hold the model.
+        layers = int(self.params["layers"])
+        if len(self.sampler.fanout) != layers:
+            raise ValueError(
+                f"sampler.fanout {self.sampler.fanout} has {len(self.sampler.fanout)} entries "
+                f"but the model has {layers} layers; give one fan-out per layer"
+            )
+        # Sample on CPU and move each batch to the device.
         cpu = Data(
             x=graph.x.cpu(),
             edge_index=graph.edge_index.cpu(),
@@ -189,31 +144,19 @@ class SAGEModel:
         mask[torch.from_numpy(train_idx)] = True
         return NeighborLoader(
             cpu,
-            num_neighbors=self._fanout(),
+            num_neighbors=list(self.sampler.fanout),
             input_nodes=mask,
             batch_size=self.sampler.batch_size,
             shuffle=True,
             num_workers=0,  # workers would fork a copy of the graph; host RAM is 7 GB
         )
 
-    # ------------------------------------------------------------------- fit #
-
     def fit(self, data: GraphDataset, feats: FeatureMatrix, split: Split, seed: int) -> FitInfo:
-        """Train on ``split.train``, early-stopping on validation PR-AUC.
-
-        ``split.test`` is never touched: not for early stopping, not for
-        normalisation, not for the threshold (PR-E4).
-        """
+        """Train on ``split.train``, early-stopping on validation PR-AUC; test never touched."""
         import torch
         from sklearn.metrics import average_precision_score
 
         check_train_labelled(data, split)
-        # seed_all covers python/numpy/torch/cuda. CUDA scatter reductions inside
-        # SAGEConv are not bitwise deterministic, so runs at the same seed can
-        # differ slightly on GPU. That is left alone deliberately: the across-seed
-        # t-interval (PR-E3) is what reports run-to-run variation, and forcing
-        # torch.use_deterministic_algorithms would trade a large slowdown for a
-        # number the interval already covers.
         seed_all(seed)
 
         graph = self._prepare(data, feats)
@@ -275,9 +218,7 @@ class SAGEModel:
                     for batch in loader:
                         batch = batch.to(self.device)
                         opt.zero_grad()
-                        # Only the seed nodes (the first batch_size rows) carry a
-                        # loss: the sampled neighbourhood is context, and it also
-                        # contains unlabelled and validation nodes.
+                        # Only seed nodes carry a loss; the sampled neighbourhood is context.
                         n_seed = batch.batch_size
                         logits = self._net(batch.x, batch.edge_index)[:n_seed]
                         loss = criterion(logits, batch.y[:n_seed])
@@ -311,7 +252,7 @@ class SAGEModel:
             val_pr_auc=best_ap,
             extra={
                 "sampler": self.sampler.kind,
-                "fanout": self._fanout() if self.sampler.kind == "neighbor" else None,
+                "fanout": list(self.sampler.fanout) if self.sampler.kind == "neighbor" else None,
                 "batch_size": self.sampler.batch_size,
                 "undirected": bool(self.params["undirected"]),
                 "epochs_run": epoch,
@@ -324,10 +265,8 @@ class SAGEModel:
             },
         )
 
-    # ------------------------------------------------------------- inference #
-
     def _infer(self, graph: _Graph, embeddings: bool = False) -> np.ndarray:
-        """Full-batch forward pass over the whole graph, in eval mode."""
+        """Full-batch forward pass in eval mode."""
         import torch
 
         assert self._net is not None
@@ -346,23 +285,17 @@ class SAGEModel:
     def predict_proba(
         self, data: GraphDataset, feats: FeatureMatrix, idx: np.ndarray
     ) -> np.ndarray:
-        """P(illicit) for ``idx``, as float32 in [0, 1]."""
+        """P(illicit) for ``idx`` as float32 in [0, 1]."""
         self._require_fitted()
         graph = self._prepare(data, feats)
         proba = self._infer(graph)[np.asarray(idx, dtype=np.int64)]
         return np.clip(proba, 0.0, 1.0).astype(np.float32)
 
     def embed(self, data: GraphDataset, feats: FeatureMatrix, idx: np.ndarray) -> np.ndarray:
-        """Hidden activations for ``idx``, taken before the linear head.
-
-        These are what the v2 embedding-drift detector compares between batches,
-        so they must be the representation, not the score.
-        """
+        """Hidden activations before the linear head, for ``idx``."""
         self._require_fitted()
         graph = self._prepare(data, feats)
         return self._infer(graph, embeddings=True)[np.asarray(idx, dtype=np.int64)]
-
-    # ------------------------------------------------------------ plumbing #
 
     def save(self, path: Path) -> Path:
         """Write the fitted weights under ``path``; returns the file written."""
@@ -379,13 +312,3 @@ class SAGEModel:
     @classmethod
     def trial0(cls) -> tuple[dict[str, Any], str]:
         return dict(TRIAL0), TRIAL0_SOURCE
-
-    @classmethod
-    def search_space(cls, trial: optuna.Trial) -> dict[str, Any]:
-        """Optuna space for v1a (D2, PR-M6); nothing in the MVP calls it."""
-        return {
-            "hidden": trial.suggest_categorical("hidden", [32, 64, 128]),
-            "dropout": trial.suggest_float("dropout", 0.0, 0.5),
-            "lr": trial.suggest_float("lr", 1e-4, 1e-2, log=True),
-            "layers": trial.suggest_categorical("layers", [2, 3]),
-        }

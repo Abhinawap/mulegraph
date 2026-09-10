@@ -1,1 +1,1 @@
-"""mulegraph.splits — see docs/architecture.md for this component's contract."""
+"""mulegraph.splits — contract in docs/project_spec.md §2."""

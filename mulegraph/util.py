@@ -1,8 +1,4 @@
-"""Paths, hashing, seeding, timing and logging.
-
-Deliberately dependency-light: importing this must not pull in torch, so that
-feature and split code stays cheap to test.
-"""
+"""Paths, hashing, provenance, seeding, timing, logging. Must not import torch at module level."""
 
 from __future__ import annotations
 
@@ -13,7 +9,6 @@ import os
 import random
 import subprocess
 import time
-from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -21,11 +16,6 @@ from typing import Any
 import numpy as np
 
 log = logging.getLogger("mulegraph")
-
-
-# --------------------------------------------------------------------------- #
-# Paths
-# --------------------------------------------------------------------------- #
 
 
 @dataclass(frozen=True)
@@ -50,11 +40,6 @@ class Paths:
 
     def tables_dir(self) -> Path:
         return self.report_dir / "tables"
-
-
-# --------------------------------------------------------------------------- #
-# Hashing
-# --------------------------------------------------------------------------- #
 
 
 def canonical_json(obj: Any) -> str:
@@ -88,16 +73,9 @@ def hash_files(paths: list[Path], length: int = 16) -> str:
     return h.hexdigest()[:length]
 
 
-# --------------------------------------------------------------------------- #
-# Provenance
-# --------------------------------------------------------------------------- #
-
-
 def git_commit(short: bool = True) -> str:
-    """Current commit, or ``"unknown"`` outside a repository. Logged on every run (PR-O1)."""
-    args = ["git", "rev-parse", "--short" if short else "HEAD", "HEAD"]
-    if not short:
-        args = ["git", "rev-parse", "HEAD"]
+    """Current commit, or ``"unknown"`` outside a repository (PR-O1)."""
+    args = ["git", "rev-parse", *(["--short"] if short else []), "HEAD"]
     try:
         out = subprocess.run(args, capture_output=True, text=True, timeout=10, check=False)
     except (OSError, subprocess.SubprocessError):
@@ -120,17 +98,8 @@ def git_dirty() -> bool:
     return out.returncode == 0 and bool(out.stdout.strip())
 
 
-# --------------------------------------------------------------------------- #
-# Seeding and devices
-# --------------------------------------------------------------------------- #
-
-
 def seed_all(seed: int) -> None:
-    """Seed Python, NumPy and (if importable) torch + CUDA.
-
-    Torch is imported lazily so that seeding costs nothing in tests that never
-    touch a GNN.
-    """
+    """Seed Python, NumPy and (if importable) torch + CUDA."""
     random.seed(seed)
     np.random.seed(seed)
     os.environ["PYTHONHASHSEED"] = str(seed)
@@ -159,17 +128,8 @@ def resolve_device(requested: str = "auto") -> str:
     return "cuda" if available else "cpu"
 
 
-# --------------------------------------------------------------------------- #
-# Timing and logging
-# --------------------------------------------------------------------------- #
-
-
 class Timer:
-    """Wall-clock timer.
-
-    Fit durations feed the week-one budget arithmetic (D2), so timing is part of
-    the recorded output rather than a debugging aid.
-    """
+    """Wall-clock timer; fit durations feed the W budget arithmetic (D2)."""
 
     def __init__(self) -> None:
         self.seconds: float = 0.0
@@ -182,15 +142,6 @@ class Timer:
     def __exit__(self, *exc: object) -> None:
         assert self._start is not None
         self.seconds = time.perf_counter() - self._start
-
-
-@contextmanager
-def log_stage(name: str):
-    """Log a stage's start and elapsed time, so a long run says what it is doing."""
-    log.info("%s ...", name)
-    with Timer() as timer:
-        yield
-    log.info("%s done in %.1fs", name, timer.seconds)
 
 
 def setup_logging(level: str | None = None) -> None:

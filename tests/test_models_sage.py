@@ -137,6 +137,13 @@ def test_neighbor_without_sampler_backend_refuses(
         fit_model(synthetic_ds, sampler_kind="neighbor")
 
 
+@pytest.mark.skipif(not HAS_SAMPLER, reason="neighbour sampling needs pyg-lib or torch-sparse")
+def test_fanout_must_match_layers(synthetic_ds: GraphDataset) -> None:
+    """One fan-out per layer; a mismatch is an error, never silently padded."""
+    with pytest.raises(ValueError, match="one fan-out per layer"):
+        fit_model(synthetic_ds, sampler_kind="neighbor", layers=3)
+
+
 def test_planted_signal_is_learnable(synthetic_ds: GraphDataset) -> None:
     """Test PR-AUC must clearly beat the positive base rate.
 
@@ -189,15 +196,6 @@ def test_trial0_is_the_logged_reference() -> None:
     assert params["hidden"] == 64 and params["layers"] == 2
     params["hidden"] = 999  # trial0 must hand back a copy, not the module constant
     assert SAGEModel.trial0()[0]["hidden"] == 64
-
-
-def test_search_space_samples_with_a_fixed_trial() -> None:
-    optuna = pytest.importorskip("optuna")
-    trial = optuna.trial.FixedTrial({"hidden": 128, "dropout": 0.3, "lr": 3e-4, "layers": 3})
-    space = SAGEModel.search_space(trial)
-    assert space == {"hidden": 128, "dropout": 0.3, "lr": 3e-4, "layers": 3}
-    model = SAGEModel(params={**TEST_PARAMS, **space}, device="cpu")
-    assert model.params["layers"] == 3
 
 
 def test_three_layer_model_fits(synthetic_ds: GraphDataset) -> None:

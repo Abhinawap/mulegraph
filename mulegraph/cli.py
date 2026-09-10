@@ -1,9 +1,4 @@
-"""Command-line entry point.
-
-Every experiment parameter lives in a YAML file under ``configs/``; the only
-option here is ``--config``. When the toolkit refuses something, the message says
-why in one sentence and names the property responsible.
-"""
+"""Typer entry point; the only experiment option is ``--config``."""
 
 from __future__ import annotations
 
