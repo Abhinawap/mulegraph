@@ -1,9 +1,9 @@
 # Project Status
 
-**Last updated:** 15 Sep 2026
-**Current milestone:** MVP — due 31 Oct 2026 (46 days out)
-**Spec version:** 0.7
-**Overall state:** The MVP definition of done is met. `mulegraph run --config configs/elliptic_mvp.yaml` ran on real Elliptic++ at `ec4501f`: 50 fits in under 9 minutes on the RTX 4060, the results table in `report/tables/elliptic_mvp_results.csv`, every child run tagged in MLflow (parent `341e0f93709f487187f8ca276ff60d6a`). Week-1 gate 2 is cleared and W = 120 min for Elliptic. Still open on the MVP milestone: AMLworld timing gates 3–5 (#1), the methods chapter draft (#8), and the supervisor questions (#9).
+**Last updated:** 16 Sep 2026
+**Current milestone:** MVP — due 31 Oct 2026 (45 days out)
+**Spec version:** 0.8
+**Overall state:** The MVP definition of done is met. `mulegraph run --config configs/elliptic_mvp.yaml` ran on real Elliptic++ at `ec4501f`: 50 fits in under 9 minutes on the RTX 4060, the results table in `report/tables/elliptic_mvp_results.csv`, every child run tagged in MLflow (parent `341e0f93709f487187f8ca276ff60d6a`). Merged to `main` at `dd85dec` (CI green, #13 closed); tag `mvp` on the merge of the closeout PR #29, which carries the MLflow export. Week-1 gate 2 is cleared and W = 120 min for Elliptic. Gate 4 is cleared: HI-Small spans 17.7 days nominally but only 10 days of ordinary traffic. Gates 3 and 5 are **blocked on compute**: IBM's PNA and SAGE settings need more than the laptop's 8 GB of GPU memory. The methods chapter draft is written (`docs/methods_draft.md`, #8). Still open on the MVP milestone: gates 3 and 5 (#1), supervisor review of the draft (#8), and the supervisor questions (#9), where compute access is now the blocker.
 
 ---
 
@@ -13,8 +13,8 @@
 |---|---|---|---|
 | Spec v0.6 | 8 Sep 2026 | ✅ Done | Requirements, design decisions D1–D4, requirement register |
 | Scaffolding | 9 Sep 2026 | ✅ Done | `CLAUDE.md`, docs, `.env.example`, `.gitignore` |
-| Week-1 gates | Sep 2026 | 🔵 In progress | 2 of 5 clear — GFP installs; Elliptic SAGE fit timed (W = 120 min for Elliptic). AMLworld timings still set its W and the v1b grid |
-| **MVP** | **31 Oct 2026** | 🔵 **In progress** | Definition of done met 15 Sep (`ec4501f`); #1 gates 3–5, #8 methods draft, #9 supervisor still open |
+| Week-1 gates | Sep 2026 | 🔵 In progress | 3 of 5 clear — GFP installs; Elliptic W = 120 min; HI-Small span read. Gates 3 and 5 blocked: AMLworld reference fits need a GPU with more than 8 GB |
+| **MVP** | **31 Oct 2026** | 🔵 **In progress** | Definition of done met 15 Sep (`ec4501f`); merged 16 Sep (`dd85dec`), tagged `mvp` at the #29 merge; #1 gates 3–5, #8 methods draft, #9 supervisor still open |
 | v1a | 21 Nov 2026 | ⬜ Not started | Elliptic complete: search decoupled from seeds, seed CIs, paired gaps, per-timestep curves, CI green |
 | v1b | 12 Dec 2026 | ⬜ Not started | AMLworld HI-Small, three regimes, PNA reference row — **scope negotiable** |
 | Benchmark freeze | before Christmas 2026 | ⬜ Not started | Code frozen; unfinished v1b work is cut, not carried |
@@ -79,17 +79,23 @@
 - Temporal test F1 (mean over seeds): `xgb.raw165` 0.778, `xgb.base` 0.722, `xgb.base_gfp` 0.718, `sage.base` 0.593 ± 0.020, `sage.base_gfp` 0.566 ± 0.019. No gap is called significant until paired intervals land (#11, #27).
 - The split hash in #4 was corrected to `f576c23d95a59084` (same partition; the old value omitted `raw_sha256`).
 
+**16 Sep 2026 — MVP merged and tagged**
+- PR #28 merged to `main` as a merge commit (`dd85dec`), so every branch SHA the docs cite (`ec4501f`, `a64a16e`, `d0fbcc3`) stays reachable. Tag `mvp` first placed on `dd85dec`, then moved to the #29 merge commit so the tagged tree includes the MLflow export.
+- CI green on main ([run 35010584925](https://github.com/Abhinawap/mulegraph/actions/runs/35010584925)): 145 passed, 1 skipped, 83% coverage, smoke OK. #13 closed.
+- `report/exports/mvp_elliptic_mvp_runs.csv`: all 102 runs of the `elliptic_mvp` experiment (both parents, `341e0f93…` at `ec4501f` and the superseded `281caef1…` at `a64a16e`), per spec §2.5's tag convention.
+- PR #26 (ponytail policy) closed as superseded by the *Building (ponytail)* section in `CLAUDE.md`.
+
 ---
 
 ## What's next
 
 In order. Each item blocks the ones below it. Items 0a–0d are the "this week" list from the [viability review](viability_review_2026-09.md) (15 Sep 2026).
 
-0a. **Merge `feature/mvp-elliptic` to `main`** and confirm CI green there (#13); tag `mvp` at the merge so `ec4501f`'s numbers have a tagged commit (NFR-1).
+0a. ~~**Merge `feature/mvp-elliptic` to `main`**~~ — done 16 Sep 2026: merge commit `dd85dec`, CI green on main (#13 closed). Tag `mvp` is on the #29 merge commit, which adds the MLflow CSV export (`report/exports/`).
 0b. **Obtain and read Šafář et al. 2026** (FSI: Digital Investigation, paywalled) — the leakage claim decides whether Elliptic stays a benchmark dataset or becomes drift-only. Blocks the methods chapter's `base` vs `raw165` argument.
-0c. **Add Maganti 2026 and Šafář 2026 to the related-work notes** for #8; Elliptic is framed as replication + feature/model decomposition of Maganti, not as the headline.
-0d. **Open #9 with the AMLworld floor:** the AMLworld two-by-two under temporal + inductive is the v1b minimum, not a negotiable extra (comment posted on #9, 15 Sep).
-1. **Clear the week-1 gates 3–5** (see checklist below): AMLworld HI-Small SAGE and PNA timings via IBM's Multi-GNN, its real time span, then AMLworld's `W` and the v1b grid arithmetic. Gate 2 is done; Elliptic's `W` = 120 min.
+0c. ~~**Add Maganti 2026 and Šafář 2026 to the related-work notes**~~ — done 16 Sep 2026 in `docs/methods_draft.md` §13; Šafář marked abstract-only. Elliptic is framed as replication + feature/model decomposition of Maganti, not as the headline.
+0d. ~~**Open #9 with the AMLworld floor:**~~ — done 15 Sep 2026. the AMLworld two-by-two under temporal + inductive is the v1b minimum, not a negotiable extra (comment posted on #9, 15 Sep).
+1. **Clear week-1 gates 3 and 5 on a bigger GPU** (see checklist below). IBM's PNA settings need at least about 13 GiB of GPU memory and SAGE more than 8 GB, so the timings need BlueBEAR or a capped cloud GPU with 16 GB or more (24 GB preferred). The Multi-GNN environment recipe, SAGE swap diff and probe scripts are recorded in *Verified method notes*. Then set AMLworld's `W` and the v1b grid arithmetic. Gates 2 and 4 are done.
 2. **Agree v1b scope with the supervisor, in writing, before v1a starts.** Floor per 0d; extras in priority order: the other two regimes, then PNA on temporal + inductive.
 3. ~~**Bootstrap the package**~~ — done 9 Sep 2026: pinned `pyproject.toml` + `uv.lock`, `types.py`, `config.py`, `util.py`, synthetic generator, model protocol, Typer CLI, CI.
 4. ~~**Elliptic++ loader**~~ — done 9 Sep 2026 (`d0fbcc3`); passes on the real files 10 Sep.
@@ -98,7 +104,7 @@ In order. Each item blocks the ones below it. Items 0a–0d are the "this week" 
 7. ~~**XGBoost then GraphSAGE**~~ — done 9 Sep 2026 (`0ccdfbf`, `dfd13ab`).
 8. ~~**Wire the pipeline and the smoke run**~~ — done 15 Sep 2026; proven on the synthetic graph, not yet on Elliptic.
 8b. ~~**Run `configs/elliptic_mvp.yaml` on real Elliptic++**~~ — done 15 Sep 2026 (`ec4501f`, #7); gate 2 cleared, W = 120 min on Elliptic.
-9. **Draft the methods chapter (#8).** Spec §1.6 mitigates "Christmas writing slips" by drafting it at MVP, not at Christmas. Do not defer this. Start from *Verified method notes* below and lead the Elliptic results with the per-window (t38–42 / t43–49) numbers, not the mean.
+9. **Methods chapter (#8): first draft written 16 Sep 2026** (`docs/methods_draft.md`); next is supervisor review and the remaining `TODO`s. Spec §1.6 mitigates "Christmas writing slips" by drafting it at MVP, not at Christmas. Do not defer this. Start from *Verified method notes* below and lead the Elliptic results with the per-window (t38–42 / t43–49) numbers, not the mean.
 
 ---
 
@@ -126,6 +132,8 @@ Facts that constrain the code, verified on fixtures and kept here instead of in 
 - **Trial 0 is merged in each model's constructor** (`XGBModel`, `SAGEModel`); config `params` override it. With no search in the MVP, runs must log `trials_completed = 0` and `trial0_source` — an honest zero, not a nominal 1 (D2).
 - **`val_f1` from `choose_threshold`** is a selection diagnostic, never a headline metric; it is logged so a val/test disagreement is visible.
 - **SAGE inference is full-batch** so sampling noise stays out of both the reported metric and the early-stopping signal.
+- **AMLworld HI-Small is ten days of traffic plus a laundering tail** (gate 4, 16 Sep 2026, recounted independently from `HI-Small_Trans.csv`). There are 5,078,345 transactions (5,177 laundering, 0.10%) and 515,088 accounts, with timestamps from 2022-09-01 00:00 to 2022-09-18 16:18, a nominal 17.68 days. After 10 Sep only 1,108 transactions remain, 655 (59%) of them laundering. The first three days hold 1,121 laundering edges. D4 expected about ten days; the populated span matches, but a test period reaching the tail sees a much higher positive rate. IBM's day 0–5 / 6–7 / 8–17 split has laundering rates of 0.08% / 0.11% / 0.19%. Which D4 branch applies goes to the supervisor (#9, q8).
+- **IBM's Multi-GNN reference settings do not fit an 8 GB GPU** (gate 3 probe, 16 Sep 2026, Multi-GNN `252b025`, batch 8192, 100 × 100 neighbours, `--emlps --reverse_mp --ego --ports`). PNA ran out of memory in the first backward pass with 11.88 GiB allocated, so it needs at least about 13 GiB. SAGE ran only by spilling into WSL shared memory and took about 48 min for one training pass, which measures the spill, not the model. Batch and neighbour counts were deliberately not reduced (they are IBM's published configuration). `env.yml` does not solve (`cudatoolkit=11.8` conflict); a working environment is Python 3.9 + pip torch 2.4.1+cu118 + PyG 2.6.1 wheels. IBM's preprocessing runs in 53 s with a 1.2 GiB peak, but its port-numbering loop adds about 5 min to every load. The SAGE swap (`SAGEe`, a copy of `GINe` with `SAGEConv`) and the probe scripts are uncommitted scratch work; they are rebuilt from this note when a bigger GPU is available.
 
 ---
 
@@ -135,8 +143,8 @@ These set `W` and the grid arithmetic. Nothing downstream is reliable until they
 
 - [x] `snapml` GraphFeaturePreprocessor installs — **GFP is the backend; `igraph` fallback not needed** (9 Sep 2026)
 - [x] One GraphSAGE fit on full Elliptic timed **with our loader** — `sage.base_gfp` temporal s0 23.1 s, slowest fit 44.3 s, so W = 120 min on Elliptic (15 Sep 2026, `ec4501f`)
-- [ ] One GraphSAGE fit and one PNA fit on AMLworld HI-Small timed **using IBM's Multi-GNN repo and its own preprocessing** (not our loader)
-- [ ] AMLworld HI-Small real time span read off during that run
+- [ ] One GraphSAGE fit and one PNA fit on AMLworld HI-Small timed **using IBM's Multi-GNN repo and its own preprocessing** (not our loader) — **blocked 16 Sep 2026**: IBM's settings need more than the laptop's 8 GB GPU (PNA OOM at 11.88 GiB allocated); needs a 16–24 GB GPU
+- [x] AMLworld HI-Small real time span read off — 2022-09-01 to 2022-09-18, 17.68 days nominal, ordinary traffic ends 10 Sep (16 Sep 2026)
 - [ ] `W` set to `max(120 min, 2 × slowest measured single fit)`; v1a/v1b grid arithmetic recomputed and the v1a/v1b dates confirmed
 
 ---
@@ -160,7 +168,7 @@ All items verified on the real Elliptic++ run at `ec4501f` (15 Sep 2026, #7).
 
 Numbered per spec §2.6. These two gate work:
 
-- **Compute access.** Is BlueBEAR (or equivalent GPU) available to final-year project students? A local RTX 4060 Laptop GPU is confirmed present (9 Sep 2026), so this no longer blocks the week-1 timing gates; it remains open for the full v1a/v1b grids. Fallback is the personal GPU plus a capped cloud budget (target under £50).
+- **Compute access.** Is BlueBEAR (or equivalent GPU) available to final-year project students? A local RTX 4060 Laptop GPU is confirmed present (9 Sep 2026), which covers Elliptic. **It now blocks week-1 gates 3 and 5** (16 Sep 2026): IBM's AMLworld reference settings need more than 8 GB of GPU memory. It also remains open for the full v1b grid. Fallback is the personal GPU plus a capped cloud budget (target under £50).
 - **v1b scope.** Must be agreed in writing *before v1a starts*. Minimum: AMLworld two-by-two under temporal + inductive only. Negotiable extras in priority order: the other two regimes, then PNA on temporal + inductive.
 
 Also open with the supervisor: dissertation submission date and whether an autumn inspection exists; per-typology vs aggregate AMLworld reporting; whether to include ROC-AUC at all; whether the Multi-GNN node-task adaptation for Elliptic is worth the time; which typologies to hold out for injected drift events and how many events test H1; whether the 3-day/1-day/rest drift split leaves enough laundering edges in training.
