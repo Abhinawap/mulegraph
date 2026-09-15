@@ -1,9 +1,9 @@
 # Project Status
 
-**Last updated:** 10 Sep 2026
-**Current milestone:** MVP — due 31 Oct 2026 (51 days out)
+**Last updated:** 15 Sep 2026
+**Current milestone:** MVP — due 31 Oct 2026 (46 days out)
 **Spec version:** 0.7
-**Overall state:** Every MVP component is built and unit-tested — Elliptic++ loader, causal GFP features, splits, XGBoost, GraphSAGE, metrics, seed intervals, results table — and the loader passes its checks on the real files. Wiring them into `pipeline.py` (#7) is next; no end-to-end run or real-data fit timing yet.
+**Overall state:** The pipeline is wired and runs end to end: `mulegraph smoke` completes all ten fits on the synthetic graph in ten seconds and writes a results table from MLflow. Every MVP component is built, unit-tested and now exercised together. What is left for the MVP is the real thing — `mulegraph run --config configs/elliptic_mvp.yaml` on Elliptic++ has not been run, so no real-data fit timing exists and week-1 gates 2–5 are still open (#1).
 
 ---
 
@@ -62,7 +62,13 @@
 - `CLAUDE.md` now makes the ponytail skill the building rule, with integrity guards overriding it.
 - Test suite: 149 passed, 1 skipped (the vacuous Elliptic causality case), including 10 loader tests on the real Elliptic++ files.
 
-No dataset has been run through the pipeline end to end yet; `pipeline.py` is a stub (#7). No fit timings recorded on real data — gates 2–5 remain open (#1).
+**15 Sep 2026 — Pipeline wired end to end** (#7)
+- `pipeline.py` now orchestrates the run: load → causal features (once per dataset+config) → select per model → split per regime → fit each (regime, model, seed) → threshold on validation → score test → one MLflow child run each → results table. Splits are built before the first fit, so an undefined regime fails immediately rather than after hours of fitting (D1).
+- `mulegraph smoke` runs the full five-config × two-seed grid on the synthetic graph in **10 seconds** on CPU, well inside its two-minute budget, and writes `report/tables/smoke_results.csv`. This is what CI runs on every push.
+- Each child run is tagged `dataset, regime, model, features, feature_version, split_hash, git_commit` — exactly what the reporter refuses to guess (PR-O1) — and logs `trials_completed = 0` with `trial0_source`, the honest zero for a milestone with no search (D2). Counts and point precision/recall are logged under `diag_*` so the results table stays the requested metrics only.
+- Three pipeline tests, including a spy asserting `choose_threshold` is only ever handed the validation set, exactly, on every fit (PR-E4). Suite: 152 passed, 1 skipped.
+
+No dataset has been run through the pipeline on **real** data yet. No fit timings recorded — gates 2–5 remain open (#1).
 
 ---
 
@@ -77,7 +83,8 @@ In order. Each item blocks the ones below it.
 5. ~~**Causal feature builder**~~ — done 9 Sep 2026 (`e6625d7`).
 6. ~~**Split builder**~~ — done 9 Sep 2026 (`d0fbcc3`).
 7. ~~**XGBoost then GraphSAGE**~~ — done 9 Sep 2026 (`0ccdfbf`, `dfd13ab`).
-8. **Wire the pipeline and the smoke run** (#7; PR-E4, PR-O1) — `run_benchmark` / `run_smoke`: each model's trial-0 params, threshold on validation, metrics, one MLflow child run per seed tagged `dataset, regime, model, features, feature_version, split_hash, git_commit` (the reporter refuses runs missing one), and `trials_completed = 0`.
+8. ~~**Wire the pipeline and the smoke run**~~ — done 15 Sep 2026; proven on the synthetic graph, not yet on Elliptic.
+8b. **Run `configs/elliptic_mvp.yaml` on real Elliptic++** — the remaining MVP deliverable (#7). This is also week-1 gate 2: the first SAGE fit on full Elliptic with our loader is timed here, which is what sets `W`.
 9. **Draft the methods chapter.** Spec §1.6 mitigates "Christmas writing slips" by drafting it at MVP, not at Christmas. Do not defer this. Start from *Verified method notes* below.
 
 ---
@@ -96,6 +103,8 @@ Facts that constrain the code, verified on fixtures and kept here instead of in 
 - **Threshold ties go to the higher threshold** (`eval/threshold.py`): same F1, fewer alerts.
 - **Two intervals, never pooled** (`eval/intervals.py`, PR-E3). The across-seed t-interval (n = 5; a normal interval would be ~⅓ too narrow) is the only basis for significance. A bootstrap over test ids is narrow regardless of training instability and is used only for per-timestep bands.
 - **`p_at_r*` are curve metrics.** They take the highest-threshold PR point that reaches the target recall (the cleanest alert queue that still catches that share) and never set the deployed threshold.
+- **The results table is scoped to one parent run** (`pipeline.py`, `report/tables.py`, PR-E3). The reporter selects child runs by experiment, so before this was scoped, re-running a config into the same experiment — after a crash, a partial run, any code change — counted the earlier children as extra seeds. Five seeds run twice reported `n_seeds = 10`: the half-width is `t(n-1)·sd/√n`, so that is t(9)/√10 in place of t(4)/√5, an interval about 40% of its honest width from no new information. The pipeline passes the parent run id it just created. `n_seeds` in a table must be the n the protocol ran.
+- **A dirty working tree is stamped, not just warned about** (`pipeline.py`, NFR-1). Runs from an uncommitted tree are tagged `<sha>-dirty`, which flows into the CSV `commit` column. A warning on stderr vanishes; the artifact has to carry it, or a reader in 2027 sees a clean commit stamp on numbers that never came from it.
 - **Split seed ≠ model seed** (`splits/builder.py`). Every model seed refits on one fixed partition, so the interval measures retraining variance, not partition variance. The split cache doubles as a determinism check (PR-D4).
 - **SAGE** (`models/sage.py`) trains on the symmetrised graph, and inference is always full-batch (exact at 203k nodes). CUDA scatter reductions are not bitwise deterministic; the seed interval covers that variation. Only `layers`/`hidden` come from the spec — the rest of `sage_default_2x64` is our choice, logged verbatim.
 - **XGBoost trial 0** is library defaults plus `n_estimators=1000` as an early-stopping ceiling. `scale_pos_weight` comes from the train split only. xgboost ≥ 2 takes `early_stopping_rounds` on the constructor, which is why trial 0 carries it.
@@ -119,7 +128,7 @@ These set `W` and the grid arithmetic. Nothing downstream is reliable until they
 
 ## MVP definition of done
 
-Component code for every unchecked item exists and is unit-tested; each is ticked once `mulegraph run` exercises it end to end (#7).
+The pipeline now exercises every item end to end, but on the synthetic graph only; the unchecked items are the ones that need the real Elliptic++ run (#7).
 
 - [ ] Elliptic++ transaction graph loads from one command and caches, with `meta.cross_time_edges = False`
 - [x] Causal graph features (fan-in/out, degree, scatter-gather, short cycles) via GFP (`e6625d7`)

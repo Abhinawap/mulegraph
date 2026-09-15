@@ -8,6 +8,15 @@ Add a dated entry for every milestone tag and every change that alters behaviour
 
 ## Unreleased
 
+### 15 Sep 2026 — Pipeline wired end to end (#7; PR-E4, PR-O1, D2)
+- **Added** `pipeline.py`: `run_benchmark` orchestrates load → causal features (built once per dataset + feature config) → per-model feature selection → per-regime split → fit each (regime, model, seed) → threshold on validation → score test → MLflow child run → results table. Splits are built before the first fit so an undefined regime (D1) fails immediately instead of after hours of fitting.
+- **Added** `run_smoke`: runs `configs/smoke.yaml` with a throwaway graph cache and MLflow store, leaving the results table in the usual `report/tables/`. Ten fits complete in 10 seconds on CPU, inside the two-minute CI budget.
+- Each child run carries the eight tags spec §2.3 makes mandatory (`dataset, dataset_version, regime, model, features, feature_version, split_hash, git_commit`) and logs `trials_completed = 0` with `trial0_source` — the honest zero for a milestone with no search (D2). Per-run counts and point precision/recall go to `diag_*`, keeping `metrics.test_*` — and so the results table — to the metrics the config requested. `dataset_version` is a tag on the child, not a param on the parent: nested runs inherit nothing and the reporter only reads children.
+- **Changed** `report/tables.py`: `write_results_table` takes an optional `parent_run_id` and filters on `tags.mlflow.parentRunId`, and the pipeline passes the run it just finished. Without it, re-running a config into the same experiment pooled the earlier children as extra seeds — five seeds run twice reported `n_seeds = 10`, shrinking the t-interval to roughly 40% of its honest width on no new evidence. PR-E3 makes that interval the sole test of significance in v1a, so the n reported must be the n the protocol ran. Found by the integrity auditor and covered by a regression test.
+- **Changed** a dirty working tree now stamps its runs `<sha>-dirty` instead of only logging a warning: the MLflow record and the CSV `commit` column must not assert provenance the run does not have (NFR-1, S5).
+- A dirty working tree now logs a warning naming the commit the run is not regenerable from (NFR-1), and a relative SQLite tracking path has its directory created rather than failing on a fresh clone.
+- **Added** `tests/test_pipeline.py`: results-table shape and provenance, every child run's tags and honest trial count, and a spy asserting `choose_threshold` receives the validation set — exactly, on every fit — and never the test set (PR-E4).
+
 ### 10 Sep 2026 — Ponytail audit: ahead-of-milestone scaffolding removed (NFR-5)
 - **Removed** v1a search scaffolding: `mulegraph/search.py`, `search_space` on every model and on the protocol, and every `SearchConfig` field except `enabled`. Each model now merges its `trial0()` reference config under the config's `params` in its own constructor (XGBoost previously relied on `search.py` for this; D2).
 - **Integrity-audit follow-ups:** the reporter raises when a child run lacks an identity or provenance tag instead of writing "unknown" (spec §2.3 now names the tags it reads: `regime`, `features`); XGBoost records `trial0_source` in its fit info; duplicate Elliptic++ txIds raise a one-sentence error; `feature_version` now also hashes `raw_sha256`.
@@ -19,7 +28,7 @@ Add a dated entry for every milestone tag and every change that alters behaviour
 - Module docstrings cut to one line plus requirement id. The verified findings they carried moved to `project_status.md` → *Verified method notes*.
 - `CLAUDE.md` gains a *Building (ponytail)* section: every change climbs the ponytail ladder, builds for the current milestone only, and never simplifies away an integrity guard.
 
-Next entry will be the pipeline wiring and smoke run (#7) and the remaining week-1 timing results (gates 2–5).
+Next entry will be the first real Elliptic++ run of `configs/elliptic_mvp.yaml` (#7) and the week-1 timing results it produces (gates 2–5).
 
 ---
 

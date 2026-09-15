@@ -74,15 +74,23 @@ def _metric_sort_key(metric: str) -> tuple[int, str]:
     return (len(_METRIC_ORDER), metric)
 
 
-def _fetch_runs(experiment: str, tracking_uri: str | None) -> pd.DataFrame:
+def _fetch_runs(
+    experiment: str, tracking_uri: str | None, parent_run_id: str | None = None
+) -> pd.DataFrame:
     import mlflow
 
     if tracking_uri:
         mlflow.set_tracking_uri(tracking_uri)
+    # PR-E3: scoped to one parent run. Re-running a config into the same experiment
+    # would otherwise pool the same seeds twice, narrowing the interval on no new
+    # evidence — t(9)/sqrt(10) instead of t(4)/sqrt(5) for a five-seed protocol.
+    filters = ["tags.kind = 'child'"]
+    if parent_run_id:
+        filters.append(f"tags.`mlflow.parentRunId` = '{parent_run_id}'")
     try:
         runs = mlflow.search_runs(
             experiment_names=[experiment],
-            filter_string="tags.kind = 'child'",
+            filter_string=" and ".join(filters),
         )
     except Exception as exc:  # mlflow raises for an experiment that does not exist
         raise ValueError(
@@ -102,6 +110,7 @@ def write_results_table(
     out_dir: Path,
     interval: Callable[[Sequence[float]], tuple[float, float, float]] | None = None,
     tracking_uri: str | None = None,
+    parent_run_id: str | None = None,
 ) -> Path:
     """Aggregate an experiment's seed runs into ``<experiment>_results.csv``; returns its path."""
     if interval is None:
@@ -110,7 +119,7 @@ def write_results_table(
 
         interval = seed_interval
 
-    runs = _fetch_runs(experiment, tracking_uri)
+    runs = _fetch_runs(experiment, tracking_uri, parent_run_id)
     metric_columns = sorted(
         (c for c in runs.columns if c.startswith("metrics.test_")),
         key=lambda c: _metric_sort_key(c[len("metrics.") :]),
