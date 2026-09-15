@@ -70,7 +70,7 @@
 
 **15 Sep 2026 — CI runs the smoke check** (`a569285`)
 - CI now runs `mulegraph smoke` after the tests; until this commit it ran lint, format and tests only, despite `CLAUDE.md` saying otherwise. First run green: smoke 10 s, whole job ~3 min.
-- The uv cache had been saving 0.1 MB: setup-uv's default `prune-cache` drops PyPI wheels, so every run re-downloaded ~3 GB of torch/CUDA wheels and the sync step swung from 1 min to 11½ min with PyPI throughput. `prune-cache: false` now keeps a 3.37 GB cache per `uv.lock`; the first cache-restored run has not happened yet.
+- The uv cache had been saving 0.1 MB: setup-uv's default `prune-cache` drops PyPI wheels, so every run re-downloaded ~3 GB of torch/CUDA wheels and the sync step swung from 1 min to 11½ min with PyPI throughput. `prune-cache: false` now keeps a 3.37 GB cache per `uv.lock`. A cache-restored run takes ~2 min to restore and 4 s to sync: slower than a fast PyPI day (36 s), but steady. Kept for that predictability.
 
 No dataset has been run through the pipeline on **real** data yet. No fit timings recorded — gates 2–5 remain open (#1).
 
