@@ -15,6 +15,9 @@ jobs:
         uses: astral-sh/setup-uv@v5
         with:
           enable-cache: true
+          # Keep the torch/CUDA wheels (~3 GB); pruning drops PyPI wheels and
+          # leaves every run to re-download them.
+          prune-cache: false
 
       - name: Sync the locked environment
         run: uv sync --frozen
@@ -29,3 +32,6 @@ jobs:
       # are marked `elliptic` and skipped here.
       - name: Tests
         run: uv run pytest -m "not elliptic" --cov=mulegraph --cov-report=term-missing
+
+      - name: Smoke
+        run: uv run mulegraph smoke
