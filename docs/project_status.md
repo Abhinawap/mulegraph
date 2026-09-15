@@ -83,10 +83,14 @@
 
 ## What's next
 
-In order. Each item blocks the ones below it.
+In order. Each item blocks the ones below it. Items 0a–0d are the "this week" list from the [viability review](viability_review_2026-09.md) (15 Sep 2026).
 
-1. **Clear the week-1 gates** (see checklist below). `W` and the v1a/v1b grid sizes are unknown until these run, and the MVP date is not confirmable without them.
-2. **Agree v1b scope with the supervisor, in writing, before v1a starts.** Minimum is the AMLworld two-by-two under temporal + inductive only.
+0a. **Merge `feature/mvp-elliptic` to `main`** and confirm CI green there (#13); tag `mvp` at the merge so `ec4501f`'s numbers have a tagged commit (NFR-1).
+0b. **Obtain and read Šafář et al. 2026** (FSI: Digital Investigation, paywalled) — the leakage claim decides whether Elliptic stays a benchmark dataset or becomes drift-only. Blocks the methods chapter's `base` vs `raw165` argument.
+0c. **Add Maganti 2026 and Šafář 2026 to the related-work notes** for #8; Elliptic is framed as replication + feature/model decomposition of Maganti, not as the headline.
+0d. **Open #9 with the AMLworld floor:** the AMLworld two-by-two under temporal + inductive is the v1b minimum, not a negotiable extra (comment posted on #9, 15 Sep).
+1. **Clear the week-1 gates 3–5** (see checklist below): AMLworld HI-Small SAGE and PNA timings via IBM's Multi-GNN, its real time span, then AMLworld's `W` and the v1b grid arithmetic. Gate 2 is done; Elliptic's `W` = 120 min.
+2. **Agree v1b scope with the supervisor, in writing, before v1a starts.** Floor per 0d; extras in priority order: the other two regimes, then PNA on temporal + inductive.
 3. ~~**Bootstrap the package**~~ — done 9 Sep 2026: pinned `pyproject.toml` + `uv.lock`, `types.py`, `config.py`, `util.py`, synthetic generator, model protocol, Typer CLI, CI.
 4. ~~**Elliptic++ loader**~~ — done 9 Sep 2026 (`d0fbcc3`); passes on the real files 10 Sep.
 5. ~~**Causal feature builder**~~ — done 9 Sep 2026 (`e6625d7`).
@@ -94,7 +98,7 @@ In order. Each item blocks the ones below it.
 7. ~~**XGBoost then GraphSAGE**~~ — done 9 Sep 2026 (`0ccdfbf`, `dfd13ab`).
 8. ~~**Wire the pipeline and the smoke run**~~ — done 15 Sep 2026; proven on the synthetic graph, not yet on Elliptic.
 8b. ~~**Run `configs/elliptic_mvp.yaml` on real Elliptic++**~~ — done 15 Sep 2026 (`ec4501f`, #7); gate 2 cleared, W = 120 min on Elliptic.
-9. **Draft the methods chapter.** Spec §1.6 mitigates "Christmas writing slips" by drafting it at MVP, not at Christmas. Do not defer this. Start from *Verified method notes* below.
+9. **Draft the methods chapter (#8).** Spec §1.6 mitigates "Christmas writing slips" by drafting it at MVP, not at Christmas. Do not defer this. Start from *Verified method notes* below and lead the Elliptic results with the per-window (t38–42 / t43–49) numbers, not the mean.
 
 ---
 
