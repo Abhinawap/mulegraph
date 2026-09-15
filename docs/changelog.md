@@ -8,6 +8,9 @@ Add a dated entry for every milestone tag and every change that alters behaviour
 
 ## Unreleased
 
+### 15 Sep 2026 — Viability review after the first Elliptic run
+- **Added** `docs/viability_review_2026-09.md`: the MVP numbers against Weber 2019 and Maganti 2026 (same picture: trees beat GNNs, everything collapses at t43), the 2023–2026 literature and its gaps, threats (Elliptic pre-empted by Maganti; Šafář 2026 leakage claim unread; synthetic AMLworld; schedule) and the recommendation: continue, reposition Elliptic as replication + decomposition, make the AMLworld inductive two-by-two the v1b floor in #9, protect v2. Linked from `CLAUDE.md` and #9.
+
 ### 15 Sep 2026 — MVP run on real Elliptic++ (#7, #1 gate 2)
 - **Ran** `uv run mulegraph run --config configs/elliptic_mvp.yaml` at `ec4501f`: 50 fits (2 regimes × 5 configs × 5 seeds) in under 9 minutes on an RTX 4060 Laptop GPU. MLflow parent `341e0f93709f487187f8ca276ff60d6a` with 50 fully tagged children; `report/tables/elliptic_mvp_results.csv` (50 rows). The MVP definition of done is met.
 - **Week-1 gate 2:** `sage.base_gfp` temporal seed 0 took 23.1 s; slowest fit 44.3 s; W = 120 min on Elliptic. Gates 3–5 (AMLworld) remain open.

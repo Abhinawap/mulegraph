@@ -136,6 +136,7 @@ Required unit tests (NFR-2):
 - [Project Spec](docs/project_spec.md) — requirements, design decisions D1–D4, requirement register (PR-*); §2 holds component contracts and data flow. **Source of truth; read before changing behaviour.**
 - [Project Status](docs/project_status.md) — current milestone progress, blockers, verified method notes
 - [Changelog](docs/changelog.md) — version history
+- [Viability review, Sep 2026](docs/viability_review_2026-09.md) — go/no-go after the first Elliptic run; positions the project against the 2019–2026 literature
 
 ## Maintaining This File
 
