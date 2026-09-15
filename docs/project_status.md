@@ -1,9 +1,9 @@
 # Project Status
 
-**Last updated:** 15 Sep 2026
-**Current milestone:** MVP — due 31 Oct 2026 (46 days out)
+**Last updated:** 16 Sep 2026
+**Current milestone:** MVP — due 31 Oct 2026 (45 days out)
 **Spec version:** 0.7
-**Overall state:** The MVP definition of done is met. `mulegraph run --config configs/elliptic_mvp.yaml` ran on real Elliptic++ at `ec4501f`: 50 fits in under 9 minutes on the RTX 4060, the results table in `report/tables/elliptic_mvp_results.csv`, every child run tagged in MLflow (parent `341e0f93709f487187f8ca276ff60d6a`). Week-1 gate 2 is cleared and W = 120 min for Elliptic. Still open on the MVP milestone: AMLworld timing gates 3–5 (#1), the methods chapter draft (#8), and the supervisor questions (#9).
+**Overall state:** The MVP definition of done is met. `mulegraph run --config configs/elliptic_mvp.yaml` ran on real Elliptic++ at `ec4501f`: 50 fits in under 9 minutes on the RTX 4060, the results table in `report/tables/elliptic_mvp_results.csv`, every child run tagged in MLflow (parent `341e0f93709f487187f8ca276ff60d6a`). Merged to `main` at `dd85dec` and tagged `mvp`; CI green on main (#13 closed). Week-1 gate 2 is cleared and W = 120 min for Elliptic. Still open on the MVP milestone: AMLworld timing gates 3–5 (#1), the methods chapter draft (#8), and the supervisor questions (#9).
 
 ---
 
@@ -14,7 +14,7 @@
 | Spec v0.6 | 8 Sep 2026 | ✅ Done | Requirements, design decisions D1–D4, requirement register |
 | Scaffolding | 9 Sep 2026 | ✅ Done | `CLAUDE.md`, docs, `.env.example`, `.gitignore` |
 | Week-1 gates | Sep 2026 | 🔵 In progress | 2 of 5 clear — GFP installs; Elliptic SAGE fit timed (W = 120 min for Elliptic). AMLworld timings still set its W and the v1b grid |
-| **MVP** | **31 Oct 2026** | 🔵 **In progress** | Definition of done met 15 Sep (`ec4501f`); #1 gates 3–5, #8 methods draft, #9 supervisor still open |
+| **MVP** | **31 Oct 2026** | 🔵 **In progress** | Definition of done met 15 Sep (`ec4501f`); merged and tagged `mvp` 16 Sep (`dd85dec`); #1 gates 3–5, #8 methods draft, #9 supervisor still open |
 | v1a | 21 Nov 2026 | ⬜ Not started | Elliptic complete: search decoupled from seeds, seed CIs, paired gaps, per-timestep curves, CI green |
 | v1b | 12 Dec 2026 | ⬜ Not started | AMLworld HI-Small, three regimes, PNA reference row — **scope negotiable** |
 | Benchmark freeze | before Christmas 2026 | ⬜ Not started | Code frozen; unfinished v1b work is cut, not carried |
@@ -79,16 +79,22 @@
 - Temporal test F1 (mean over seeds): `xgb.raw165` 0.778, `xgb.base` 0.722, `xgb.base_gfp` 0.718, `sage.base` 0.593 ± 0.020, `sage.base_gfp` 0.566 ± 0.019. No gap is called significant until paired intervals land (#11, #27).
 - The split hash in #4 was corrected to `f576c23d95a59084` (same partition; the old value omitted `raw_sha256`).
 
+**16 Sep 2026 — MVP merged and tagged**
+- PR #28 merged to `main` as a merge commit (`dd85dec`), so every branch SHA the docs cite (`ec4501f`, `a64a16e`, `d0fbcc3`) stays reachable. Tag `mvp` on `dd85dec`.
+- CI green on main ([run 35010584925](https://github.com/Abhinawap/mulegraph/actions/runs/35010584925)): 145 passed, 1 skipped, 83% coverage, smoke OK. #13 closed.
+- `report/exports/mvp_elliptic_mvp_runs.csv`: all 102 runs of the `elliptic_mvp` experiment (both parents, `341e0f93…` at `ec4501f` and the superseded `281caef1…` at `a64a16e`), per spec §2.5's tag convention.
+- PR #26 (ponytail policy) closed as superseded by the *Building (ponytail)* section in `CLAUDE.md`.
+
 ---
 
 ## What's next
 
 In order. Each item blocks the ones below it. Items 0a–0d are the "this week" list from the [viability review](viability_review_2026-09.md) (15 Sep 2026).
 
-0a. **Merge `feature/mvp-elliptic` to `main`** and confirm CI green there (#13); tag `mvp` at the merge so `ec4501f`'s numbers have a tagged commit (NFR-1).
+0a. ~~**Merge `feature/mvp-elliptic` to `main`**~~ — done 16 Sep 2026: merge commit `dd85dec` tagged `mvp`, CI green on main (#13 closed). The MLflow CSV export lands with the closeout PR (`report/exports/`).
 0b. **Obtain and read Šafář et al. 2026** (FSI: Digital Investigation, paywalled) — the leakage claim decides whether Elliptic stays a benchmark dataset or becomes drift-only. Blocks the methods chapter's `base` vs `raw165` argument.
 0c. **Add Maganti 2026 and Šafář 2026 to the related-work notes** for #8; Elliptic is framed as replication + feature/model decomposition of Maganti, not as the headline.
-0d. **Open #9 with the AMLworld floor:** the AMLworld two-by-two under temporal + inductive is the v1b minimum, not a negotiable extra (comment posted on #9, 15 Sep).
+0d. ~~**Open #9 with the AMLworld floor:**~~ — done 15 Sep 2026. the AMLworld two-by-two under temporal + inductive is the v1b minimum, not a negotiable extra (comment posted on #9, 15 Sep).
 1. **Clear the week-1 gates 3–5** (see checklist below): AMLworld HI-Small SAGE and PNA timings via IBM's Multi-GNN, its real time span, then AMLworld's `W` and the v1b grid arithmetic. Gate 2 is done; Elliptic's `W` = 120 min.
 2. **Agree v1b scope with the supervisor, in writing, before v1a starts.** Floor per 0d; extras in priority order: the other two regimes, then PNA on temporal + inductive.
 3. ~~**Bootstrap the package**~~ — done 9 Sep 2026: pinned `pyproject.toml` + `uv.lock`, `types.py`, `config.py`, `util.py`, synthetic generator, model protocol, Typer CLI, CI.
