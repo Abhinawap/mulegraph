@@ -2,7 +2,7 @@
 
 **Last updated:** 16 Sep 2026
 **Current milestone:** MVP — due 31 Oct 2026 (45 days out)
-**Spec version:** 0.7
+**Spec version:** 0.8
 **Overall state:** The MVP definition of done is met. `mulegraph run --config configs/elliptic_mvp.yaml` ran on real Elliptic++ at `ec4501f`: 50 fits in under 9 minutes on the RTX 4060, the results table in `report/tables/elliptic_mvp_results.csv`, every child run tagged in MLflow (parent `341e0f93709f487187f8ca276ff60d6a`). Merged to `main` at `dd85dec` and tagged `mvp`; CI green on main (#13 closed). Week-1 gate 2 is cleared and W = 120 min for Elliptic. Still open on the MVP milestone: AMLworld timing gates 3–5 (#1), the methods chapter draft (#8), and the supervisor questions (#9).
 
 ---
