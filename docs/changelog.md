@@ -15,8 +15,8 @@ Add a dated entry for every milestone tag and every change that alters behaviour
 - **Changed** spec to 0.8: AMLworld SAGE is timed as a `SAGEConv` swap inside Multi-GNN's GIN class, because Multi-GNN ships no SAGE.
 
 ### 16 Sep 2026 — MVP merged to main and tagged `mvp`
-- **Merged** PR #28 (`feature/mvp-elliptic`) into `main` as merge commit `dd85dec`; **tagged** `mvp` there. CI green on main (145 passed, 1 skipped, 83% coverage, smoke OK); #13 closed.
-- **Added** `report/exports/mvp_elliptic_mvp_runs.csv`: the `elliptic_mvp` MLflow experiment, 102 runs across parents `341e0f93…` (`ec4501f`, reported) and `281caef1…` (`a64a16e`, pre-fix SAGE record). Committed after the tag, so it ships with the closeout PR.
+- **Merged** PR #28 (`feature/mvp-elliptic`) into `main` as merge commit `dd85dec`. **Tagged** `mvp` on the merge of the closeout PR #29 (first placed on `dd85dec`, moved so the tagged tree carries the export). CI green on main (145 passed, 1 skipped, 83% coverage, smoke OK); #13 closed.
+- **Added** `report/exports/mvp_elliptic_mvp_runs.csv`: the `elliptic_mvp` MLflow experiment, 102 runs across parents `341e0f93…` (`ec4501f`, reported) and `281caef1…` (`a64a16e`, pre-fix SAGE record). Ships with the closeout PR #29, whose merge commit carries the `mvp` tag.
 - **Closed** PR #26 unmerged; `CLAUDE.md` *Building (ponytail)* already sets the policy.
 
 ### 15 Sep 2026 — Viability review after the first Elliptic run
