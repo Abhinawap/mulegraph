@@ -6,7 +6,7 @@
 
 **Current milestone:** MVP (target 31 Oct 2026) — Elliptic++ only, two regimes.
 
-MVP is done when `mulegraph run --config configs/elliptic_temporal.yaml` produces a results table for `{xgb, sage} × {local, local+gfp}` plus the `xgb.raw165` reference row, on random and temporal splits, scored on fraud F1 / PR-AUC / P@R0.5 / P@R0.8, with every run logged to MLflow.
+MVP is done when `mulegraph run --config configs/elliptic_mvp.yaml` produces a results table for `{xgb, sage} × {local, local+gfp}` plus the `xgb.raw165` reference row, on random and temporal splits, scored on fraud F1 / PR-AUC / P@R0.5 / P@R0.8, with every run logged to MLflow.
 
 **Expected finding:** graph *features* matter more than graph *models*. Confirming or overturning it is a result either way — never tune toward the expected answer.
 
@@ -105,7 +105,7 @@ uv sync                                    # Install pinned deps
 uv run mulegraph --help
 
 # Benchmark
-uv run mulegraph run --config configs/elliptic_temporal.yaml
+uv run mulegraph run --config configs/elliptic_mvp.yaml
 uv run mulegraph drift --config configs/elliptic_drift.yaml       # v2
 uv run mulegraph simulate --config configs/elliptic_policies.yaml # v2
 uv run mulegraph report --milestone v1a

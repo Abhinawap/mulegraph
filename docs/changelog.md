@@ -19,7 +19,20 @@ Add a dated entry for every milestone tag and every change that alters behaviour
 - Module docstrings cut to one line plus requirement id. The verified findings they carried moved to `project_status.md` → *Verified method notes*.
 - `CLAUDE.md` gains a *Building (ponytail)* section: every change climbs the ponytail ladder, builds for the current milestone only, and never simplifies away an integrity guard.
 
-Next entry will be the component modules (loader, feature builder, splits, models, evaluator) and the remaining week-1 timing results (gates 2–5).
+Next entry will be the pipeline wiring and smoke run (#7) and the remaining week-1 timing results (gates 2–5).
+
+---
+
+## 9 Sep 2026 — MVP component modules
+
+### Added
+- **Elliptic++ loader and splits** (`d0fbcc3`; PR-D1, PR-D4, PR-E1, D1) — `data/elliptic.py` reads the three raw CSVs with pyarrow (only the 165 published features plus id and time, as float32), drops the 17 Elliptic++ extras into `meta.dropped_columns` (PR-M7), computes `cross_time_edges` and refuses cross-timestep edges, and asserts the published 2023.1 counts. `splits/builder.py` builds stratified-random and temporal splits of labelled nodes, runs the leakage assertions on every build, rejects `temporal_inductive` when `cross_time_edges` is False, and caches by definition hash as a determinism check.
+- **Causal graph features** (`e6625d7`; PR-F1–F3, PR-M7) — `features/gfp.py` drives snapml forward-only, one timestep per batch, against a probed output layout; `features/aggregate.py` folds edge features onto nodes (`node_agg_v1`) under the `node_time >= t` guard; `features/builder.py` caches Parquet under a hash of the full definition; `features/select.py` resolves `base` / `base_gfp` / `raw165` against the loader's feature blocks.
+- **Models** — GraphSAGE with neighbour sampling and full-batch inference (`dfd13ab`; PR-M3, PR-M5); XGBoost with train-only class weighting and early stopping on validation PR-AUC (`0ccdfbf`; PR-M1, PR-M2).
+- **Evaluation and reporting** (`0ccdfbf`; PR-E2–E4, PR-E6, PR-O1) — validation-only threshold selection, metrics that refuse accuracy, the across-seed Student-t interval, and the MLflow-to-CSV results table with a provenance-mismatch warning.
+
+### Changed
+- MLflow tracking uses a local SQLite file (`sqlite:///mlruns/mlflow.db`) instead of the `file:` store, which MLflow 3 refuses (`7c9133e`; NFR-1).
 
 ---
 

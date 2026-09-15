@@ -1,9 +1,9 @@
 # Project Status
 
 **Last updated:** 10 Sep 2026
-**Current milestone:** MVP — due 31 Oct 2026 (52 days out)
+**Current milestone:** MVP — due 31 Oct 2026 (51 days out)
 **Spec version:** 0.7
-**Overall state:** Package foundation in place (types, config, CLI, synthetic fixture, CI). Component modules and the real loader are next.
+**Overall state:** Every MVP component is built and unit-tested — Elliptic++ loader, causal GFP features, splits, XGBoost, GraphSAGE, metrics, seed intervals, results table — and the loader passes its checks on the real files. Wiring them into `pipeline.py` (#7) is next; no end-to-end run or real-data fit timing yet.
 
 ---
 
@@ -45,12 +45,24 @@
 - **Cost warning for the `W` arithmetic:** `lc-cycle_len: 10` is superlinear in graph density. 4,000 edges over 400 nodes did not finish in 3 minutes; the same 4,000 edges over 3,000 nodes completed in seconds. Elliptic's per-timestep components are sparse so this should be safe, but the cycle bound must be timed on real data in gate 2 and treated as a tunable if it eats into `W`.
 - Probed hardware: **RTX 4060 Laptop GPU** present, so gates 2–4 are not blocked on BlueBEAR access.
 
+**9 Sep 2026 — MVP component modules**
+- Elliptic++ loader and leak-checked splits (`d0fbcc3`; PR-D1, PR-D4, PR-E1, D1): only the 165 published features enter `x`; `cross_time_edges` is computed, not asserted; the published 2023.1 counts are checked; random and temporal splits run their leakage assertions on every build.
+- Causal GFP features with `node_agg_v1` aggregation (`e6625d7`; PR-F1–F3, PR-M7): a forward-only driver, a probed output layout, `base` / `base_gfp` / `raw165` selection, and the synthetic-fixture causality test.
+- GraphSAGE with neighbour sampling (`dfd13ab`; PR-M3, PR-M5); XGBoost, validation-only thresholding, metrics, seed t-intervals and the MLflow results table (`0ccdfbf`; PR-M1, PR-M2, PR-E2–E4, PR-E6).
+- MLflow tracking moved to a local SQLite file (`7c9133e`) because MLflow 3 refuses the `file:` store.
+
 **9 Sep 2026 — Repository on GitHub with issue tracking**
 - `Abhinawap/mulegraph` (private) now holds `main`, `feature/gfp-backend-decision` and `feature/mvp-elliptic`.
 - Four GitHub Milestones with the spec's due dates (MVP 31 Oct, v1a 21 Nov, v1b 12 Dec, v2 13 Feb 2027) and **25 issues, one per §1.3 milestone deliverable**, each listing its PR-* ids, done-criteria and the integrity constraints that apply. Five MVP deliverables already delivered are closed citing their commits (#2–#6); #25 is a closed "not planned" guard listing every Later / Not-in-scope item (NFR-5).
 - Three Claude Code commands keep GitHub and this file in step: `/issue` (spec-aware create, refuses out-of-scope), `/close-issue` (close with commit evidence, tick the line here), `/issues-sync` (report disagreements, past-due milestones, open gate/supervisor blockers).
 
-No dataset has been loaded through the pipeline end to end yet; `pipeline.py` is a stub (#7). No fit timings recorded on real data — gates 2–5 remain open (#1).
+**10 Sep 2026 — Ponytail audit and cleanup** (`05ba7c5`)
+- Removed ahead-of-milestone scaffolding — the v1a search module, `DriftSignal`, accepted-but-ignored config keys, `optuna`, `python-dotenv` — and the duplicate `docs/architecture.md`; net −1,100 lines. Docstrings cut to one line; their verified findings now live in *Verified method notes* below.
+- The integrity-auditor found no violations. Its follow-ups are in: XGBoost merges trial 0 in its constructor, the reporter refuses runs missing a tag, `feature_version` hashes `raw_sha256`.
+- `CLAUDE.md` now makes the ponytail skill the building rule, with integrity guards overriding it.
+- Test suite: 149 passed, 1 skipped (the vacuous Elliptic causality case), including 10 loader tests on the real Elliptic++ files.
+
+No dataset has been run through the pipeline end to end yet; `pipeline.py` is a stub (#7). No fit timings recorded on real data — gates 2–5 remain open (#1).
 
 ---
 
@@ -61,12 +73,12 @@ In order. Each item blocks the ones below it.
 1. **Clear the week-1 gates** (see checklist below). `W` and the v1a/v1b grid sizes are unknown until these run, and the MVP date is not confirmable without them.
 2. **Agree v1b scope with the supervisor, in writing, before v1a starts.** Minimum is the AMLworld two-by-two under temporal + inductive only.
 3. ~~**Bootstrap the package**~~ — done 9 Sep 2026: pinned `pyproject.toml` + `uv.lock`, `types.py`, `config.py`, `util.py`, synthetic generator, model protocol, Typer CLI, CI.
-4. **Elliptic++ loader** (PR-D1, PR-D4) — deterministic, caches to disk, sets `meta.cross_time_edges = False` and `meta.feature_blocks`.
-5. **Causal feature builder** (PR-F1–F3) — GFP backend (chosen 9 Sep, fallback not being built), driven strictly batch-by-batch in time order, plus the synthetic multi-timestep fixture and its causality test.
-6. **Split builder** (PR-E1) — random and temporal, with leakage assertions and `split_hash`.
-7. **XGBoost then GraphSAGE** behind the shared protocol (PR-M1–M3, PR-M5).
-8. **Evaluator and MLflow wiring** (PR-E2, PR-E4, PR-O1) — threshold on validation, metrics, run logging.
-9. **Draft the methods chapter.** Spec §1.6 mitigates "Christmas writing slips" by drafting it at MVP, not at Christmas. Do not defer this.
+4. ~~**Elliptic++ loader**~~ — done 9 Sep 2026 (`d0fbcc3`); passes on the real files 10 Sep.
+5. ~~**Causal feature builder**~~ — done 9 Sep 2026 (`e6625d7`).
+6. ~~**Split builder**~~ — done 9 Sep 2026 (`d0fbcc3`).
+7. ~~**XGBoost then GraphSAGE**~~ — done 9 Sep 2026 (`0ccdfbf`, `dfd13ab`).
+8. **Wire the pipeline and the smoke run** (#7; PR-E4, PR-O1) — `run_benchmark` / `run_smoke`: each model's trial-0 params, threshold on validation, metrics, one MLflow child run per seed tagged `dataset, regime, model, features, feature_version, split_hash, git_commit` (the reporter refuses runs missing one), and `trials_completed = 0`.
+9. **Draft the methods chapter.** Spec §1.6 mitigates "Christmas writing slips" by drafting it at MVP, not at Christmas. Do not defer this. Start from *Verified method notes* below.
 
 ---
 
@@ -107,12 +119,14 @@ These set `W` and the grid arithmetic. Nothing downstream is reliable until they
 
 ## MVP definition of done
 
+Component code for every unchecked item exists and is unit-tested; each is ticked once `mulegraph run` exercises it end to end (#7).
+
 - [ ] Elliptic++ transaction graph loads from one command and caches, with `meta.cross_time_edges = False`
-- [ ] Causal graph features (fan-in/out, degree, scatter-gather, short cycles) via GFP or igraph fallback
-- [ ] Causality unit test passes on a synthetic multi-timestep fixture
+- [x] Causal graph features (fan-in/out, degree, scatter-gather, short cycles) via GFP (`e6625d7`)
+- [x] Causality unit test passes on a synthetic multi-timestep fixture (`e6625d7`)
 - [ ] Leak-checked temporal split: train ≤ t34, val t35–37, test t38–49; id-overlap assertion; `split_hash` logged
 - [ ] Threshold chosen on the validation PR curve, never on test
-- [ ] `mulegraph run --config configs/elliptic_temporal.yaml` produces the results table for `{xgb, sage} × {local, local+gfp}` + `xgb.raw165`, on random and temporal splits
+- [ ] `mulegraph run --config configs/elliptic_mvp.yaml` produces the results table for `{xgb, sage} × {local, local+gfp}` + `xgb.raw165`, on random and temporal splits
 - [ ] Metrics: fraud F1, PR-AUC, P@R0.5, P@R0.8
 - [ ] Every run logs params, metrics, seed, feature version, git commit to MLflow
 
