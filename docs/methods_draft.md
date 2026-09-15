@@ -279,11 +279,15 @@ The slowest of the 50 MVP fits took 44.3 s, so
 
 Week-1 gates 3–5 time one GraphSAGE fit and one PNA fit on AMLworld HI-Small using IBM's Multi-GNN repository with its own preprocessing, not our loader (spec §1.3). Multi-GNN ships GIN, GAT, PNA and RGCN but no GraphSAGE, so the SAGE fit swaps PyG's `SAGEConv` into Multi-GNN's GIN model class and keeps IBM's loader, sampler and training loop (spec v0.8).
 
-`TODO(gate 3)`: HI-Small SAGE fit time (`SAGEConv` swap) and PNA fit time, with commit and hardware.
+**Time span (gate 4, measured 16 Sep 2026).** `HI-Small_Trans.csv` holds 5,078,345 transactions between 515,088 accounts, 5,177 of them laundering (0.10%). Timestamps run from 2022-09-01 00:00 to 2022-09-18 16:18, a nominal span of 17.68 days. Ordinary traffic occupies only the first ten days. After 10 September only 1,108 transactions remain, and 655 of them (59%) are laundering: the generator completes its laundering patterns after background activity stops. The first three calendar days hold 2,076,752 transactions and 1,121 laundering edges.
 
-`TODO(gate 4)`: HI-Small real time span.
+The spec expected about ten days (D4). The nominal span is longer, but the populated span matches. Any temporal split whose test period reaches into the tail sees a far higher positive rate than training. IBM's own Multi-GNN split (days 0–5 train, 6–7 validation, 8–17 test) gives a laundering rate of 0.08%, 0.11% and 0.19% across the three. Which D4 branch applies, and how the tail is handled, is an open question for the supervisor (#9, §2.6 q8).
 
-`TODO(gate 5): W_AML = max(120 min, 2 × slowest HI-Small fit)`.
+**Fit times (gate 3, not measured).** Neither reference fit ran to completion on the development laptop (RTX 4060 Laptop, 8 GB). Multi-GNN was pinned at commit `252b025` with IBM's published settings (batch 8192, 100 × 100 sampled neighbours, `--emlps --reverse_mp --ego --ports`). PNA ran out of GPU memory in the first backward pass with 11.88 GiB already allocated, so its peak is at least about 13 GiB. The SAGE swap spilled into WSL shared memory: one training pass took about 48 min and inference had not finished after another 18. That figure measures the memory spill, not the model, and is not used. Batch size and neighbour counts were not reduced, because either change would stop the run being IBM's published configuration. IBM's preprocessing itself ran in 53 s with a peak of 1.2 GiB RAM, and its port-numbering step adds about five minutes to every data load.
+
+`TODO(gate 3)`: SAGE and PNA fit times on a GPU with at least 16 GB (24 GB preferred), with Multi-GNN commit and hardware.
+
+`TODO(gate 5): W_AML = max(120 min, 2 × slowest HI-Small fit)`, pending gate 3.
 
 ## 10. Reproducibility and provenance
 
