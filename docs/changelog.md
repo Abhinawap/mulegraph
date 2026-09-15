@@ -8,6 +8,12 @@ Add a dated entry for every milestone tag and every change that alters behaviour
 
 ## Unreleased
 
+### 15 Sep 2026 — MVP run on real Elliptic++ (#7, #1 gate 2)
+- **Ran** `uv run mulegraph run --config configs/elliptic_mvp.yaml` at `ec4501f`: 50 fits (2 regimes × 5 configs × 5 seeds) in under 9 minutes on an RTX 4060 Laptop GPU. MLflow parent `341e0f93709f487187f8ca276ff60d6a` with 50 fully tagged children; `report/tables/elliptic_mvp_results.csv` (50 rows). The MVP definition of done is met.
+- **Week-1 gate 2:** `sage.base_gfp` temporal seed 0 took 23.1 s; slowest fit 44.3 s; W = 120 min on Elliptic. Gates 3–5 (AMLworld) remain open.
+- XGBoost rows are bit-identical to the pre-fix run at `a64a16e`; its five seeds are identical fits (library defaults leave `random_state` nothing to randomise), which #27 handles for paired gaps.
+- Temporal test performance collapses after t43 (dark-market shutdown): F1 0.83–0.89 on t38–42, 0.02–0.03 on t43–49 for the XGBoost configs. Recorded in *Verified method notes*.
+
 ### 15 Sep 2026 — SAGE inputs z-scored with train-row statistics (PR-M3, PR-E1)
 - **Changed** `SAGEModel.fit` computes per-column mean and std on `split.train` rows only and applies them to every node before message passing; columns constant on train keep std 1 (zero after centring, never NaN). The cached device graph is rebuilt at each fit so statistics from another split are never reused.
 - Why: the first real Elliptic++ run (`a64a16e`, MLflow parent `281caef1ade34e42aecd51bf2ab1e8a8`) fed SAGE raw inputs — base columns up to |x| = 265, GFP counts up to 472 with 86% zeros. Unscaled inputs handicap the GNN and bias the benchmark toward the expected finding. Adopted on principle, before measuring its effect.
@@ -38,8 +44,6 @@ Add a dated entry for every milestone tag and every change that alters behaviour
 - **Simplified** the reporter's tag lookup (no alias table), Elliptic++ id resolution (`pd.Index.get_indexer`), and SAGE fan-out handling: a fan-out whose length differs from `layers` is now an error instead of being silently extended.
 - Module docstrings cut to one line plus requirement id. The verified findings they carried moved to `project_status.md` → *Verified method notes*.
 - `CLAUDE.md` gains a *Building (ponytail)* section: every change climbs the ponytail ladder, builds for the current milestone only, and never simplifies away an integrity guard.
-
-Next entry will be the first real Elliptic++ run of `configs/elliptic_mvp.yaml` (#7) and the week-1 timing results it produces (gates 2–5).
 
 ---
 

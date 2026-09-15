@@ -3,7 +3,7 @@
 **Last updated:** 15 Sep 2026
 **Current milestone:** MVP — due 31 Oct 2026 (46 days out)
 **Spec version:** 0.7
-**Overall state:** The pipeline is wired and runs end to end: `mulegraph smoke` completes all ten fits on the synthetic graph in ten seconds and writes a results table from MLflow. Every MVP component is built, unit-tested and now exercised together. What is left for the MVP is the real thing — `mulegraph run --config configs/elliptic_mvp.yaml` on Elliptic++ has not been run, so no real-data fit timing exists and week-1 gates 2–5 are still open (#1).
+**Overall state:** The MVP definition of done is met. `mulegraph run --config configs/elliptic_mvp.yaml` ran on real Elliptic++ at `ec4501f`: 50 fits in under 9 minutes on the RTX 4060, the results table in `report/tables/elliptic_mvp_results.csv`, every child run tagged in MLflow (parent `341e0f93709f487187f8ca276ff60d6a`). Week-1 gate 2 is cleared and W = 120 min for Elliptic. Still open on the MVP milestone: AMLworld timing gates 3–5 (#1), the methods chapter draft (#8), and the supervisor questions (#9).
 
 ---
 
@@ -13,8 +13,8 @@
 |---|---|---|---|
 | Spec v0.6 | 8 Sep 2026 | ✅ Done | Requirements, design decisions D1–D4, requirement register |
 | Scaffolding | 9 Sep 2026 | ✅ Done | `CLAUDE.md`, docs, `.env.example`, `.gitignore` |
-| Week-1 gates | Sep 2026 | 🔵 In progress | 1 of 5 clear — GFP installs; timing runs still set `W` and the grid arithmetic |
-| **MVP** | **31 Oct 2026** | 🔵 **In progress** | Elliptic++, two regimes, two-by-two + `xgb.raw165`, MLflow logging |
+| Week-1 gates | Sep 2026 | 🔵 In progress | 2 of 5 clear — GFP installs; Elliptic SAGE fit timed (W = 120 min for Elliptic). AMLworld timings still set its W and the v1b grid |
+| **MVP** | **31 Oct 2026** | 🔵 **In progress** | Definition of done met 15 Sep (`ec4501f`); #1 gates 3–5, #8 methods draft, #9 supervisor still open |
 | v1a | 21 Nov 2026 | ⬜ Not started | Elliptic complete: search decoupled from seeds, seed CIs, paired gaps, per-timestep curves, CI green |
 | v1b | 12 Dec 2026 | ⬜ Not started | AMLworld HI-Small, three regimes, PNA reference row — **scope negotiable** |
 | Benchmark freeze | before Christmas 2026 | ⬜ Not started | Code frozen; unfinished v1b work is cut, not carried |
@@ -72,7 +72,12 @@
 - CI now runs `mulegraph smoke` after the tests; until this commit it ran lint, format and tests only, despite `CLAUDE.md` saying otherwise. First run green: smoke 10 s, whole job ~3 min.
 - The uv cache had been saving 0.1 MB: setup-uv's default `prune-cache` drops PyPI wheels, so every run re-downloaded ~3 GB of torch/CUDA wheels and the sync step swung from 1 min to 11½ min with PyPI throughput. `prune-cache: false` now keeps a 3.37 GB cache per `uv.lock`. A cache-restored run takes ~2 min to restore and 4 s to sync: slower than a fast PyPI day (36 s), but steady. Kept for that predictability.
 
-No dataset has been run through the pipeline on **real** data yet. No fit timings recorded — gates 2–5 remain open (#1).
+**15 Sep 2026 — MVP run on real Elliptic++** (#7; `ec4501f`)
+- `configs/elliptic_mvp.yaml` runs end to end on the real data: 2 regimes × 5 model configs × 5 seeds = 50 fits, 1 MLflow parent (`341e0f93709f487187f8ca276ff60d6a`) + 50 children, each tagged `git_commit, dataset_version, feature_version, split_hash, seed`; `report/tables/elliptic_mvp_results.csv` has 50 rows. GFP features for all 49 timesteps take ~2 s.
+- A first run at `a64a16e` (parent `281caef1ade34e42aecd51bf2ab1e8a8`) exposed unscaled SAGE inputs; SAGE was fixed in `ec4501f` and the grid rerun. XGBoost rows are bit-identical across the two runs.
+- **Gate 2:** `sage.base_gfp` temporal seed 0 fits in 23.1 s; the slowest of the 50 fits is 44.3 s. W = max(120 min, 2 × 44 s) = **120 min** on Elliptic.
+- Temporal test F1 (mean over seeds): `xgb.raw165` 0.778, `xgb.base` 0.722, `xgb.base_gfp` 0.718, `sage.base` 0.593 ± 0.020, `sage.base_gfp` 0.566 ± 0.019. No gap is called significant until paired intervals land (#11, #27).
+- The split hash in #4 was corrected to `f576c23d95a59084` (same partition; the old value omitted `raw_sha256`).
 
 ---
 
@@ -88,7 +93,7 @@ In order. Each item blocks the ones below it.
 6. ~~**Split builder**~~ — done 9 Sep 2026 (`d0fbcc3`).
 7. ~~**XGBoost then GraphSAGE**~~ — done 9 Sep 2026 (`0ccdfbf`, `dfd13ab`).
 8. ~~**Wire the pipeline and the smoke run**~~ — done 15 Sep 2026; proven on the synthetic graph, not yet on Elliptic.
-8b. **Run `configs/elliptic_mvp.yaml` on real Elliptic++** — the remaining MVP deliverable (#7). This is also week-1 gate 2: the first SAGE fit on full Elliptic with our loader is timed here, which is what sets `W`.
+8b. ~~**Run `configs/elliptic_mvp.yaml` on real Elliptic++**~~ — done 15 Sep 2026 (`ec4501f`, #7); gate 2 cleared, W = 120 min on Elliptic.
 9. **Draft the methods chapter.** Spec §1.6 mitigates "Christmas writing slips" by drafting it at MVP, not at Christmas. Do not defer this. Start from *Verified method notes* below.
 
 ---
@@ -104,6 +109,7 @@ Facts that constrain the code, verified on fixtures and kept here instead of in 
 - **Causality guard** (`node_agg_v1`): a batch at *t* writes only into nodes with `node_time >= t`. Vacuous on Elliptic, load-bearing on cross-time graphs. Nodes with no causal evidence keep a zero row.
 - **Elliptic++ extras are dropped** (`data/elliptic.py`, PR-M7). The 17 columns the ++ release adds, including graph-derived `in_txs_degree`/`out_txs_degree`, would put neighbourhood structure into `base`; they are recorded in `meta.dropped_columns`. pyarrow reads only the 167 kept columns, as float32, so the 695 MB CSV fits a 7 GB host.
 - **`edge_time` is the source node's timestep.** That is causal only because the loader refuses any cross-timestep edge.
+- **Elliptic temporal test is two regimes in one** (verified 15 Sep 2026 by refitting the deterministic XGBoost configs at `a64a16e`). Test F1 is 0.83–0.89 on t38–42 and 0.02–0.03 on t43–49, after the dark-market shutdown; 169 of the 828 test illicit nodes fall after t43. Validation (t35–37) precedes the shutdown, so val F1 ≈ 0.93 does not predict test. This is also why P@R0.8 is ≈ 0.2 for every model: reaching 80% recall means reaching into the post-shutdown cases no model detects. The per-timestep curves (#12) are what make the headline mean readable.
 - **Threshold ties go to the higher threshold** (`eval/threshold.py`): same F1, fewer alerts.
 - **Two intervals, never pooled** (`eval/intervals.py`, PR-E3). The across-seed t-interval (n = 5; a normal interval would be ~⅓ too narrow) is the only basis for significance. A bootstrap over test ids is narrow regardless of training instability and is used only for per-timestep bands.
 - **`p_at_r*` are curve metrics.** They take the highest-threshold PR point that reaches the target recall (the cleanest alert queue that still catches that share) and never set the deployed threshold.
@@ -124,7 +130,7 @@ Facts that constrain the code, verified on fixtures and kept here instead of in 
 These set `W` and the grid arithmetic. Nothing downstream is reliable until they are done.
 
 - [x] `snapml` GraphFeaturePreprocessor installs — **GFP is the backend; `igraph` fallback not needed** (9 Sep 2026)
-- [ ] One GraphSAGE fit on full Elliptic timed **with our loader**
+- [x] One GraphSAGE fit on full Elliptic timed **with our loader** — `sage.base_gfp` temporal s0 23.1 s, slowest fit 44.3 s, so W = 120 min on Elliptic (15 Sep 2026, `ec4501f`)
 - [ ] One GraphSAGE fit and one PNA fit on AMLworld HI-Small timed **using IBM's Multi-GNN repo and its own preprocessing** (not our loader)
 - [ ] AMLworld HI-Small real time span read off during that run
 - [ ] `W` set to `max(120 min, 2 × slowest measured single fit)`; v1a/v1b grid arithmetic recomputed and the v1a/v1b dates confirmed
@@ -133,16 +139,16 @@ These set `W` and the grid arithmetic. Nothing downstream is reliable until they
 
 ## MVP definition of done
 
-The pipeline now exercises every item end to end, but on the synthetic graph only; the unchecked items are the ones that need the real Elliptic++ run (#7).
+All items verified on the real Elliptic++ run at `ec4501f` (15 Sep 2026, #7).
 
-- [ ] Elliptic++ transaction graph loads from one command and caches, with `meta.cross_time_edges = False`
+- [x] Elliptic++ transaction graph loads from one command and caches, with `meta.cross_time_edges = False` (`ec4501f`)
 - [x] Causal graph features (fan-in/out, degree, scatter-gather, short cycles) via GFP (`e6625d7`)
 - [x] Causality unit test passes on a synthetic multi-timestep fixture (`e6625d7`)
-- [ ] Leak-checked temporal split: train ≤ t34, val t35–37, test t38–49; id-overlap assertion; `split_hash` logged
-- [ ] Threshold chosen on the validation PR curve, never on test
-- [ ] `mulegraph run --config configs/elliptic_mvp.yaml` produces the results table for `{xgb, sage} × {local, local+gfp}` + `xgb.raw165`, on random and temporal splits
-- [ ] Metrics: fraud F1, PR-AUC, P@R0.5, P@R0.8
-- [ ] Every run logs params, metrics, seed, feature version, git commit to MLflow
+- [x] Leak-checked temporal split: train ≤ t34, val t35–37, test t38–49; id-overlap assertion; `split_hash` logged (`f576c23d95a59084`, `ec4501f`)
+- [x] Threshold chosen on the validation PR curve, never on test (`pipeline.py`, spy test in `tests/test_pipeline.py`)
+- [x] `mulegraph run --config configs/elliptic_mvp.yaml` produces the results table for `{xgb, sage} × {local, local+gfp}` + `xgb.raw165`, on random and temporal splits (`ec4501f`)
+- [x] Metrics: fraud F1, PR-AUC, P@R0.5, P@R0.8 (`ec4501f`)
+- [x] Every run logs params, metrics, seed, feature version, git commit to MLflow (`ec4501f`, parent `341e0f93709f487187f8ca276ff60d6a`)
 
 ---
 
