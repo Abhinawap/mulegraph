@@ -51,9 +51,7 @@ def build_context() -> str:
         open_items = len(re.findall(r"^\s*- \[ \]", text, re.MULTILINE))
         done_items = len(re.findall(r"^\s*- \[[xX]\]", text, re.MULTILINE))
         if open_items or done_items:
-            lines.append(
-                f"Checklist in project_status.md: {done_items} done, {open_items} open"
-            )
+            lines.append(f"Checklist in project_status.md: {done_items} done, {open_items} open")
     else:
         lines.append("docs/project_status.md not found — project state unknown.")
 

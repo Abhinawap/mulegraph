@@ -1,0 +1,69 @@
+[project]
+name = "mulegraph"
+version = "0.1.0"
+description = "Benchmark and drift-monitoring toolkit for money-mule / laundering network detection under temporal evaluation"
+readme = "README.md"
+requires-python = "==3.11.*"
+license = { text = "MIT" }
+authors = [{ name = "Bambang Abhinawa Pinakasakti" }]
+
+dependencies = [
+    # CLI and configuration
+    "typer==0.27.2",
+    "pydantic==2.13.5",
+    "pyyaml==6.0.3",
+    # Numerics and tabular
+    "numpy==2.4.6",
+    "pandas==3.0.5",
+    "pyarrow==25.0.1",
+    "scipy==1.17.1",
+    "scikit-learn==1.9.0",
+    # Models
+    # 3.2.0 is the newest xgboost supporting Python 3.11 (3.3+ require >=3.12).
+    "xgboost==3.2.0",
+    "torch==2.14.0",
+    "torch-geometric==2.8.0.post1",
+    "pyg-lib==0.9.0+pt214cu130",
+    # Graph features (week-1 gate 1: GFP is the backend, no igraph fallback)
+    "snapml==1.17.2",
+    # Tracking (optuna returns with v1a search)
+    "mlflow==3.16.0",
+]
+
+[project.scripts]
+mulegraph = "mulegraph.cli:app"
+
+[dependency-groups]
+dev = [
+    "pytest==9.0.1",
+    "pytest-cov==7.0.0",
+    "ruff==0.14.5",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["mulegraph"]
+
+[tool.uv]
+# The project targets Linux (WSL2 / BlueBEAR); resolving for win32 pulls in
+# conflicting wheels that are never installed.
+environments = ["sys_platform == 'linux'"]
+# pyg-lib ships only from the PyG wheel index, keyed by torch + CUDA version.
+find-links = ["https://data.pyg.org/whl/torch-2.14.0+cu130.html"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP", "SIM"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+markers = [
+    "elliptic: requires the real Elliptic++ raw CSVs on disk",
+    "slow: end-to-end runs measured in tens of seconds",
+]

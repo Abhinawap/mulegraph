@@ -21,11 +21,12 @@ venv/
 htmlcov/
 coverage.xml
 
-# Data, caches, and experiment outputs (see project_spec.md 2.3)
-data/
-mlruns/
-report/figures/
-report/tables/
+# Data, caches, and experiment outputs (see project_spec.md 2.3).
+# Anchored to the repository root so the `mulegraph/data/` package is still tracked.
+/data/
+/mlruns/
+/report/figures/
+/report/tables/
 *.pt
 *.parquet
 *.npy
@@ -38,3 +39,6 @@ report/tables/
 *.swp
 .idea/
 .vscode/
+
+# uv
+.venv/

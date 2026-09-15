@@ -1,0 +1,328 @@
+"""GraphSAGE node classifier behind the shared model protocol (PR-M3, PR-M5).
+
+Reads ``feats.values``, never ``data.x`` (PR-M7), z-scored with train-row statistics; inference
+is always full-batch.
+"""
+
+from __future__ import annotations
+
+import copy
+from dataclasses import dataclass
+from pathlib import Path
+from typing import TYPE_CHECKING, Any
+
+import numpy as np
+
+from mulegraph.config import SamplerConfig
+from mulegraph.models.base import FitInfo, check_train_labelled
+from mulegraph.types import FeatureMatrix, GraphDataset, Split
+from mulegraph.util import Timer, log, seed_all
+
+if TYPE_CHECKING:  # pragma: no cover - typing only
+    import torch
+
+#: Reference config. Only ``layers``/``hidden`` come from the spec; the rest is ours.
+TRIAL0: dict[str, Any] = {
+    "hidden": 64,
+    "layers": 2,
+    "dropout": 0.2,
+    "lr": 1e-3,
+    "weight_decay": 0.0,
+    "epochs": 200,
+    "patience": 20,
+    "undirected": True,
+}
+TRIAL0_SOURCE = "sage_default_2x64"
+
+
+@dataclass
+class _Graph:
+    """Device tensors for one (dataset, feature matrix) pair, built once per fit."""
+
+    x: torch.Tensor  # float32 [N, K]
+    edge_index: torch.Tensor  # int64 [2, E'], symmetrised if undirected
+    y: torch.Tensor  # float32 [N]; -1 entries never used
+    key: tuple[int, int, int, int]
+
+
+def _build_net(in_dim: int, hidden: int, layers: int, dropout: float) -> torch.nn.Module:
+    """``SAGEConv -> ReLU -> Dropout`` x ``layers``, then a linear head."""
+    import torch
+    from torch_geometric.nn import SAGEConv
+
+    class Net(torch.nn.Module):
+        def __init__(self) -> None:
+            super().__init__()
+            dims = [in_dim] + [hidden] * layers
+            self.convs = torch.nn.ModuleList(SAGEConv(dims[i], dims[i + 1]) for i in range(layers))
+            self.dropout = torch.nn.Dropout(dropout)
+            self.head = torch.nn.Linear(hidden, 1)
+
+        def embed(self, x: torch.Tensor, edge_index: torch.Tensor) -> torch.Tensor:
+            for i, conv in enumerate(self.convs):
+                x = torch.relu(conv(x, edge_index))
+                if i < len(self.convs) - 1:  # no dropout on the representation itself
+                    x = self.dropout(x)
+            return x
+
+        def forward(self, x: torch.Tensor, edge_index: torch.Tensor) -> torch.Tensor:
+            return self.head(self.embed(x, edge_index)).squeeze(-1)
+
+    return Net()
+
+
+class SAGEModel:
+    """Two- or three-layer GraphSAGE with class-weighted BCE and early stopping."""
+
+    def __init__(
+        self,
+        params: dict[str, Any] | None = None,
+        device: str = "cpu",
+        sampler: SamplerConfig | None = None,
+    ) -> None:
+        self.name = "sage"
+        self.params: dict[str, Any] = {**TRIAL0, **(params or {})}
+        self.device = device
+        self.sampler = sampler or SamplerConfig()
+        if self.params["layers"] not in (2, 3):
+            raise ValueError(f"sage layers must be 2 or 3, got {self.params['layers']}")
+        self._net: torch.nn.Module | None = None
+        self._graph: _Graph | None = None
+        self._scale: tuple[np.ndarray, np.ndarray] | None = None
+
+    def _prepare(self, data: GraphDataset, feats: FeatureMatrix) -> _Graph:
+        """Device tensors for (data, feats), cached by object identity."""
+        import torch
+
+        if feats.values.shape[0] != data.num_nodes:
+            raise ValueError(
+                f"feature matrix has {feats.values.shape[0]} rows but the graph has "
+                f"{data.num_nodes} nodes; features must be in node order"
+            )
+        key = (id(data), id(feats), data.num_nodes, feats.num_features)
+        if self._graph is not None and self._graph.key == key:
+            return self._graph
+
+        assert self._scale is not None, "fit sets the train-row scaling before any graph is built"
+        mean, std = self._scale
+        x = ((feats.values - mean) / std).astype(np.float32)
+
+        edge_index = torch.from_numpy(np.ascontiguousarray(data.edge_index))
+        if self.params["undirected"]:
+            from torch_geometric.utils import to_undirected
+
+            edge_index = to_undirected(edge_index, num_nodes=data.num_nodes)
+        graph = _Graph(
+            x=torch.from_numpy(x).to(self.device),
+            edge_index=edge_index.to(self.device),
+            y=torch.from_numpy(data.y.astype(np.float32)).to(self.device),
+            key=key,
+        )
+        self._graph = graph
+        return graph
+
+    def _make_loader(self, graph: _Graph, train_idx: np.ndarray, num_nodes: int) -> Any:
+        import torch
+        import torch_geometric.typing as pyg_typing
+        from torch_geometric.data import Data
+        from torch_geometric.loader import NeighborLoader
+
+        if not (pyg_typing.WITH_PYG_LIB or pyg_typing.WITH_TORCH_SPARSE):
+            raise RuntimeError(
+                "sampler.kind 'neighbor' needs pyg-lib or torch-sparse, neither of which is "
+                "importable here; set sampler: {kind: full_batch} in the config (exact, and "
+                "affordable on a graph this size) or install pyg-lib for your torch build"
+            )
+        layers = int(self.params["layers"])
+        if len(self.sampler.fanout) != layers:
+            raise ValueError(
+                f"sampler.fanout {self.sampler.fanout} has {len(self.sampler.fanout)} entries "
+                f"but the model has {layers} layers; give one fan-out per layer"
+            )
+        # Sample on CPU and move each batch to the device.
+        cpu = Data(
+            x=graph.x.cpu(),
+            edge_index=graph.edge_index.cpu(),
+            y=graph.y.cpu(),
+            num_nodes=num_nodes,
+        )
+        mask = torch.zeros(num_nodes, dtype=torch.bool)
+        mask[torch.from_numpy(train_idx)] = True
+        return NeighborLoader(
+            cpu,
+            num_neighbors=list(self.sampler.fanout),
+            input_nodes=mask,
+            batch_size=self.sampler.batch_size,
+            shuffle=True,
+            num_workers=0,  # workers would fork a copy of the graph; host RAM is 7 GB
+        )
+
+    def fit(self, data: GraphDataset, feats: FeatureMatrix, split: Split, seed: int) -> FitInfo:
+        """Train on ``split.train``, early-stopping on validation PR-AUC; test never touched."""
+        import torch
+        from sklearn.metrics import average_precision_score
+
+        check_train_labelled(data, split)
+        seed_all(seed)
+
+        train_idx = np.asarray(split.train, dtype=np.int64)
+        # Preprocessing is fitted on train rows only; val and test never shape it (PR-E1).
+        # ponytail: z-score only; log1p for heavy-tailed GFP counts if v1a search shows it matters
+        train_x = feats.values[train_idx].astype(np.float64)
+        std = train_x.std(axis=0)
+        std[std == 0] = 1.0  # a column constant on train maps to zero, not NaN
+        self._scale = (train_x.mean(axis=0), std)
+        self._graph = None  # a graph cached under earlier statistics must not be reused
+
+        graph = self._prepare(data, feats)
+        val_idx = np.asarray(split.val, dtype=np.int64)
+        y_train = data.y[train_idx]
+        n_pos = int((y_train == 1).sum())
+        n_neg = int((y_train == 0).sum())
+        if n_pos == 0 or n_neg == 0:
+            raise ValueError(
+                f"split.train has {n_pos} illicit and {n_neg} licit nodes; "
+                "class-weighted BCE needs both classes present"
+            )
+        pos_weight = n_neg / n_pos
+
+        self._net = _build_net(
+            feats.num_features,
+            int(self.params["hidden"]),
+            int(self.params["layers"]),
+            float(self.params["dropout"]),
+        ).to(self.device)
+        opt = torch.optim.Adam(
+            self._net.parameters(),
+            lr=float(self.params["lr"]),
+            weight_decay=float(self.params["weight_decay"]),
+        )
+        criterion = torch.nn.BCEWithLogitsLoss(
+            pos_weight=torch.tensor(pos_weight, dtype=torch.float32, device=self.device)
+        )
+
+        loader = None
+        if self.sampler.kind == "neighbor":
+            loader = self._make_loader(graph, train_idx, data.num_nodes)
+        train_t = torch.from_numpy(train_idx).to(self.device)
+
+        y_val = data.y[val_idx]
+        epochs = int(self.params["epochs"])
+        patience = int(self.params["patience"])
+        best_ap, best_epoch, best_state, stale, epoch = -1.0, 0, None, 0, 0
+        log.info(
+            "sage fit: %d train / %d val nodes, sampler=%s, up to %d epochs on %s",
+            train_idx.size,
+            val_idx.size,
+            self.sampler.kind,
+            epochs,
+            self.device,
+        )
+
+        with Timer() as timer:
+            for epoch in range(1, epochs + 1):
+                self._net.train()
+                if loader is None:
+                    opt.zero_grad()
+                    logits = self._net(graph.x, graph.edge_index)[train_t]
+                    loss = criterion(logits, graph.y[train_t])
+                    loss.backward()
+                    opt.step()
+                else:
+                    for batch in loader:
+                        batch = batch.to(self.device)
+                        opt.zero_grad()
+                        # Only seed nodes carry a loss; the sampled neighbourhood is context.
+                        n_seed = batch.batch_size
+                        logits = self._net(batch.x, batch.edge_index)[:n_seed]
+                        loss = criterion(logits, batch.y[:n_seed])
+                        loss.backward()
+                        opt.step()
+
+                proba = self._infer(graph)[val_idx]
+                ap = float(average_precision_score(y_val, proba))
+                if ap > best_ap:
+                    best_ap, best_epoch, stale = ap, epoch, 0
+                    best_state = copy.deepcopy(
+                        {k: v.detach().cpu() for k, v in self._net.state_dict().items()}
+                    )
+                else:
+                    stale += 1
+                    if stale >= patience:
+                        log.info("sage early stop at epoch %d (best %d)", epoch, best_epoch)
+                        break
+
+        if best_state is not None:
+            self._net.load_state_dict(best_state)
+        log.info(
+            "sage fit done in %.1fs: best val PR-AUC %.4f at epoch %d",
+            timer.seconds,
+            best_ap,
+            best_epoch,
+        )
+        return FitInfo(
+            seconds=timer.seconds,
+            best_iteration=best_epoch,
+            val_pr_auc=best_ap,
+            extra={
+                "sampler": self.sampler.kind,
+                "fanout": list(self.sampler.fanout) if self.sampler.kind == "neighbor" else None,
+                "batch_size": self.sampler.batch_size,
+                "undirected": bool(self.params["undirected"]),
+                "epochs_run": epoch,
+                "pos_weight": pos_weight,
+                "n_train_pos": n_pos,
+                "n_train_neg": n_neg,
+                "device": self.device,
+                "trial0_source": TRIAL0_SOURCE,
+                "params": dict(self.params),
+            },
+        )
+
+    def _infer(self, graph: _Graph, embeddings: bool = False) -> np.ndarray:
+        """Full-batch forward pass in eval mode."""
+        import torch
+
+        assert self._net is not None
+        self._net.eval()
+        with torch.no_grad():
+            if embeddings:
+                out = self._net.embed(graph.x, graph.edge_index)
+                return out.detach().cpu().numpy().astype(np.float32)
+            logits = self._net(graph.x, graph.edge_index)
+            return torch.sigmoid(logits).detach().cpu().numpy().astype(np.float32)
+
+    def _require_fitted(self) -> None:
+        if self._net is None:
+            raise RuntimeError("sage model is not fitted; call fit() before predict_proba/embed")
+
+    def predict_proba(
+        self, data: GraphDataset, feats: FeatureMatrix, idx: np.ndarray
+    ) -> np.ndarray:
+        """P(illicit) for ``idx`` as float32 in [0, 1]."""
+        self._require_fitted()
+        graph = self._prepare(data, feats)
+        proba = self._infer(graph)[np.asarray(idx, dtype=np.int64)]
+        return np.clip(proba, 0.0, 1.0).astype(np.float32)
+
+    def embed(self, data: GraphDataset, feats: FeatureMatrix, idx: np.ndarray) -> np.ndarray:
+        """Hidden activations before the linear head, for ``idx``."""
+        self._require_fitted()
+        graph = self._prepare(data, feats)
+        return self._infer(graph, embeddings=True)[np.asarray(idx, dtype=np.int64)]
+
+    def save(self, path: Path) -> Path:
+        """Write the fitted weights under ``path``; returns the file written."""
+        import torch
+
+        self._require_fitted()
+        assert self._net is not None
+        path = Path(path)
+        path.mkdir(parents=True, exist_ok=True)
+        target = path / "model.pt"
+        torch.save({k: v.detach().cpu() for k, v in self._net.state_dict().items()}, target)
+        return target
+
+    @classmethod
+    def trial0(cls) -> tuple[dict[str, Any], str]:
+        return dict(TRIAL0), TRIAL0_SOURCE

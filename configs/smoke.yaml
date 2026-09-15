@@ -1,0 +1,41 @@
+# Two-minute end-to-end check on a synthetic Elliptic-shaped graph.
+# CI cannot download Elliptic++, so this is what runs on every push.
+
+dataset:
+  name: synthetic_elliptic
+  version: smoke
+  synthetic:
+    n_nodes: 2000
+    n_timesteps: 49
+    illicit_rate: 0.10
+    cross_time_edges: false
+    seed: 0
+
+features:
+  backend: gfp
+  families: [fan, degree, scatter_gather, lc_cycle]
+  bins: [2, 4, 8]
+  window: 1
+  cycle_len: 6                      # shorter bound: cycle cost grows with density
+  vertex_stats: true
+  num_threads: 2
+
+split:
+  regimes:
+    - regime: temporal
+      train_end: 34
+      val: [35, 37]
+      test: [38, 49]
+
+models:
+  - {name: xgb,  features: base,     params: {n_estimators: 50}}
+  - {name: xgb,  features: base_gfp, params: {n_estimators: 50}}
+  - {name: sage, features: base,     sampler: {kind: full_batch}, params: {epochs: 20, patience: 5}}
+  - {name: sage, features: base_gfp, sampler: {kind: full_batch}, params: {epochs: 20, patience: 5}}
+  - {name: xgb,  features: raw165,   params: {n_estimators: 50}}
+
+search: {enabled: false}
+seeds: [0, 1]
+eval: {metrics: [f1, pr_auc, roc_auc, p_at_r50, p_at_r80], seed_ci: t95}
+mlflow: {experiment: smoke}
+device: cpu
