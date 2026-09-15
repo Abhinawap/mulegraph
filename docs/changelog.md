@@ -8,6 +8,10 @@ Add a dated entry for every milestone tag and every change that alters behaviour
 
 ## Unreleased
 
+### 15 Sep 2026 — CI runs the smoke check and keeps its wheel cache (`a569285`)
+- **Added** a `Smoke` step (`uv run mulegraph smoke`) after the tests in `.github/workflows/ci.yml`. CI previously never exercised the pipeline end to end, contrary to `CLAUDE.md`.
+- **Changed** `prune-cache: false` on setup-uv. The default pruning stripped PyPI wheels before saving, leaving 0.1 MB caches and a full ~3 GB torch/CUDA download on every run (sync 1 min to 11½ min depending on PyPI). The two empty caches were deleted so the full 3.37 GB cache could be saved under the unchanged `uv.lock` key.
+
 ### 15 Sep 2026 — Pipeline wired end to end (#7; PR-E4, PR-O1, D2)
 - **Added** `pipeline.py`: `run_benchmark` orchestrates load → causal features (built once per dataset + feature config) → per-model feature selection → per-regime split → fit each (regime, model, seed) → threshold on validation → score test → MLflow child run → results table. Splits are built before the first fit so an undefined regime (D1) fails immediately instead of after hours of fitting.
 - **Added** `run_smoke`: runs `configs/smoke.yaml` with a throwaway graph cache and MLflow store, leaving the results table in the usual `report/tables/`. Ten fits complete in 10 seconds on CPU, inside the two-minute CI budget.

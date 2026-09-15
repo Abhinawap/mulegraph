@@ -64,9 +64,13 @@
 
 **15 Sep 2026 — Pipeline wired end to end** (#7)
 - `pipeline.py` now orchestrates the run: load → causal features (once per dataset+config) → select per model → split per regime → fit each (regime, model, seed) → threshold on validation → score test → one MLflow child run each → results table. Splits are built before the first fit, so an undefined regime fails immediately rather than after hours of fitting (D1).
-- `mulegraph smoke` runs the full five-config × two-seed grid on the synthetic graph in **10 seconds** on CPU, well inside its two-minute budget, and writes `report/tables/smoke_results.csv`. This is what CI runs on every push.
+- `mulegraph smoke` runs the full five-config × two-seed grid on the synthetic graph in **10 seconds** on CPU, well inside its two-minute budget, and writes `report/tables/smoke_results.csv`.
 - Each child run is tagged `dataset, regime, model, features, feature_version, split_hash, git_commit` — exactly what the reporter refuses to guess (PR-O1) — and logs `trials_completed = 0` with `trial0_source`, the honest zero for a milestone with no search (D2). Counts and point precision/recall are logged under `diag_*` so the results table stays the requested metrics only.
-- Three pipeline tests, including a spy asserting `choose_threshold` is only ever handed the validation set, exactly, on every fit (PR-E4). Suite: 152 passed, 1 skipped.
+- Three pipeline tests, including a spy asserting `choose_threshold` is only ever handed the validation set, exactly, on every fit (PR-E4). Suite: 153 passed, 1 skipped.
+
+**15 Sep 2026 — CI runs the smoke check** (`a569285`)
+- CI now runs `mulegraph smoke` after the tests; until this commit it ran lint, format and tests only, despite `CLAUDE.md` saying otherwise. First run green: smoke 10 s, whole job ~3 min.
+- The uv cache had been saving 0.1 MB: setup-uv's default `prune-cache` drops PyPI wheels, so every run re-downloaded ~3 GB of torch/CUDA wheels and the sync step swung from 1 min to 11½ min with PyPI throughput. `prune-cache: false` now keeps a 3.37 GB cache per `uv.lock`; the first cache-restored run has not happened yet.
 
 No dataset has been run through the pipeline on **real** data yet. No fit timings recorded — gates 2–5 remain open (#1).
 
