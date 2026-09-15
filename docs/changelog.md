@@ -8,6 +8,13 @@ Add a dated entry for every milestone tag and every change that alters behaviour
 
 ## Unreleased
 
+### 15 Sep 2026 — SAGE inputs z-scored with train-row statistics (PR-M3, PR-E1)
+- **Changed** `SAGEModel.fit` computes per-column mean and std on `split.train` rows only and applies them to every node before message passing; columns constant on train keep std 1 (zero after centring, never NaN). The cached device graph is rebuilt at each fit so statistics from another split are never reused.
+- Why: the first real Elliptic++ run (`a64a16e`, MLflow parent `281caef1ade34e42aecd51bf2ab1e8a8`) fed SAGE raw inputs — base columns up to |x| = 265, GFP counts up to 472 with 86% zeros. Unscaled inputs handicap the GNN and bias the benchmark toward the expected finding. Adopted on principle, before measuring its effect.
+- **The SAGE rows of the `a64a16e` run are superseded**; its XGBoost rows are unaffected (trees are scale-invariant). The run stays in MLflow as the pre-fix record.
+- **Added** two tests: statistics ignore poisoned val/test rows; an all-zero column yields finite predictions.
+- Recorded split hash correction: the temporal split hash is `f576c23d95a59084` from `d0fbcc3` onward; the `b065845303bd6a35` quoted in #4 was the same partition hashed without `raw_sha256` (arrays verified bit-identical).
+
 ### 15 Sep 2026 — CI runs the smoke check and keeps its wheel cache (`a569285`)
 - **Added** a `Smoke` step (`uv run mulegraph smoke`) after the tests in `.github/workflows/ci.yml`. CI previously never exercised the pipeline end to end, contrary to `CLAUDE.md`.
 - **Changed** `prune-cache: false` on setup-uv. The default pruning stripped PyPI wheels before saving, leaving 0.1 MB caches and a full ~3 GB torch/CUDA download on every run (sync 1 min to 11½ min depending on PyPI). The two empty caches were deleted so the full 3.37 GB cache could be saved under the unchanged `uv.lock` key.

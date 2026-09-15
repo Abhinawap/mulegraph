@@ -363,7 +363,7 @@ class Policy(Protocol):
 
 #### Model specifics
 - `xgb` (base / base_gfp / raw165 on Elliptic): `scale_pos_weight` from class ratio, early stopping on validation PR-AUC, Optuna over depth, learning rate, subsample, colsample, min_child_weight.
-- `sage` (base / base_gfp): two `SAGEConv` layers, `NeighborLoader` with fan-out [15, 10], class-weighted BCE, Optuna over hidden size, dropout, learning rate, layers ∈ {2, 3}. On Elliptic, sampling is within the timestep component by construction.
+- `sage` (base / base_gfp): inputs z-scored with train-row statistics, two `SAGEConv` layers, `NeighborLoader` with fan-out [15, 10], class-weighted BCE, Optuna over hidden size, dropout, learning rate, layers ∈ {2, 3}. On Elliptic, sampling is within the timestep component by construction.
 - `pna` / `gin_eu` (base only): Multi-GNN reference implementation, edge task on AMLworld. Elliptic node-head adaptation is optional and time-boxed to one week.
 - Search: once per (model config, regime, dataset) at `search_seed`; best config rerun over `seeds`. Budget is the shared wall-clock cap W; trial ceilings 40 / 20 / 10 for xgb / sage / pna bound the search but are not the budget; trial 0 is the fixed reference config; median pruner for GNNs. Logged: cap, wall-clock used, ceiling, trials completed, trial-0 source, best trial.
 - Threshold: maximise F1 on the validation PR curve; stored with the run.

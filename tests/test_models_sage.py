@@ -13,6 +13,7 @@ negative and nothing downstream would notice.
 
 from __future__ import annotations
 
+import dataclasses
 import importlib.util
 
 import numpy as np
@@ -188,6 +189,34 @@ def test_seed_controls_the_fit(synthetic_ds: GraphDataset) -> None:
     np.testing.assert_allclose(proba_a, proba_b, rtol=0, atol=1e-6)
     assert info_a.val_pr_auc == pytest.approx(info_b.val_pr_auc, abs=1e-9)
     assert not np.allclose(proba_a, proba_c, atol=1e-6)
+
+
+def test_scaling_uses_train_rows_only(synthetic_ds: GraphDataset) -> None:
+    """Val and test rows never reach the scaling statistics, stored or applied (PR-E1)."""
+    feats, split = make_feats(synthetic_ds), make_split(synthetic_ds)
+    values = feats.values.copy()
+    values[np.concatenate([split.val, split.test])] = 1e6
+    poisoned = dataclasses.replace(feats, values=values)
+    model = SAGEModel(params={**TEST_PARAMS, "epochs": 1}, device="cpu")
+    model.fit(synthetic_ds, poisoned, split, seed=0)
+    mean, std = model._scale
+    train = values[split.train].astype(np.float64)
+    np.testing.assert_allclose(mean, train.mean(axis=0))
+    np.testing.assert_allclose(std, train.std(axis=0))
+    # What the network receives, not just what is stored.
+    expected = ((values - train.mean(axis=0)) / train.std(axis=0)).astype(np.float32)
+    np.testing.assert_allclose(model._graph.x.numpy(), expected, rtol=1e-5)
+
+
+def test_constant_column_does_not_produce_nan(synthetic_ds: GraphDataset) -> None:
+    feats, split = make_feats(synthetic_ds), make_split(synthetic_ds)
+    zeros = np.zeros((feats.values.shape[0], 1), dtype=np.float32)
+    padded = dataclasses.replace(
+        feats, values=np.hstack([feats.values, zeros]), columns=[*feats.columns, "all_zero"]
+    )
+    model = SAGEModel(params={**TEST_PARAMS, "epochs": 2}, device="cpu")
+    model.fit(synthetic_ds, padded, split, seed=0)
+    assert np.isfinite(model.predict_proba(synthetic_ds, padded, split.test)).all()
 
 
 def test_trial0_is_the_logged_reference() -> None:

@@ -1,6 +1,7 @@
 """GraphSAGE node classifier behind the shared model protocol (PR-M3, PR-M5).
 
-Reads ``feats.values``, never ``data.x`` (PR-M7); inference is always full-batch.
+Reads ``feats.values``, never ``data.x`` (PR-M7), z-scored with train-row statistics; inference
+is always full-batch.
 """
 
 from __future__ import annotations
@@ -87,6 +88,7 @@ class SAGEModel:
             raise ValueError(f"sage layers must be 2 or 3, got {self.params['layers']}")
         self._net: torch.nn.Module | None = None
         self._graph: _Graph | None = None
+        self._scale: tuple[np.ndarray, np.ndarray] | None = None
 
     def _prepare(self, data: GraphDataset, feats: FeatureMatrix) -> _Graph:
         """Device tensors for (data, feats), cached by object identity."""
@@ -101,13 +103,17 @@ class SAGEModel:
         if self._graph is not None and self._graph.key == key:
             return self._graph
 
+        assert self._scale is not None, "fit sets the train-row scaling before any graph is built"
+        mean, std = self._scale
+        x = ((feats.values - mean) / std).astype(np.float32)
+
         edge_index = torch.from_numpy(np.ascontiguousarray(data.edge_index))
         if self.params["undirected"]:
             from torch_geometric.utils import to_undirected
 
             edge_index = to_undirected(edge_index, num_nodes=data.num_nodes)
         graph = _Graph(
-            x=torch.from_numpy(np.ascontiguousarray(feats.values)).to(self.device),
+            x=torch.from_numpy(x).to(self.device),
             edge_index=edge_index.to(self.device),
             y=torch.from_numpy(data.y.astype(np.float32)).to(self.device),
             key=key,
@@ -159,8 +165,16 @@ class SAGEModel:
         check_train_labelled(data, split)
         seed_all(seed)
 
-        graph = self._prepare(data, feats)
         train_idx = np.asarray(split.train, dtype=np.int64)
+        # Preprocessing is fitted on train rows only; val and test never shape it (PR-E1).
+        # ponytail: z-score only; log1p for heavy-tailed GFP counts if v1a search shows it matters
+        train_x = feats.values[train_idx].astype(np.float64)
+        std = train_x.std(axis=0)
+        std[std == 0] = 1.0  # a column constant on train maps to zero, not NaN
+        self._scale = (train_x.mean(axis=0), std)
+        self._graph = None  # a graph cached under earlier statistics must not be reused
+
+        graph = self._prepare(data, feats)
         val_idx = np.asarray(split.val, dtype=np.int64)
         y_train = data.y[train_idx]
         n_pos = int((y_train == 1).sum())
