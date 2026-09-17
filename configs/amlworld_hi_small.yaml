@@ -28,6 +28,15 @@ split:
 models:
   - {name: xgb, features: base}             # amounts, currencies, format, hour of day
   - {name: xgb, features: base_gfp}
+  # Edge head over learned account embeddings; neighbourhoods sampled by edge time (PR-F2).
+  - name: sage
+    features: base
+    sampler: {kind: neighbor, fanout: [15, 10], batch_size: 4096}
+    params: {epochs: 10, patience: 3}
+  - name: sage
+    features: base_gfp
+    sampler: {kind: neighbor, fanout: [15, 10], batch_size: 4096}
+    params: {epochs: 10, patience: 3}
 
 search:
   enabled: false
