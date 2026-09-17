@@ -49,11 +49,19 @@ when the *relationship* between features and labels changed at t43. Watching the
 distribution alone would have missed that entirely. GraphSAGE had already fallen 20% below its
 validation F1 by t39, so for it "drift" and "failure" arrive together.
 
-**4. On AMLworld the graph features matter a lot.** *(full-data run pending — see below)* On the
-first four days of HI-Small, XGBoost on the raw transaction fields gets PR-AUC 0.04; with the same
-causal graph features it gets 0.24. Elliptic's timesteps are disconnected components, so a
-one-timestep graph window has little to see; AMLworld's accounts persist, and fan-in/fan-out
-patterns are exactly what the simulator's laundering typologies are made of.
+**4. On AMLworld the graph features matter a lot.** On HI-Small (5.1M transactions, 0.10%
+laundering, IBM's day split), XGBoost on the six raw transaction fields gets F1 0.21 / PR-AUC 0.11;
+with the same causal graph features it gets **F1 0.54 / PR-AUC 0.52**. That is the same direction
+and roughly the same size as IBM's own GFP paper reports (0.63 minority-class F1 for GFP+XGB under
+their protocol). Elliptic's timesteps are disconnected components, so a one-timestep graph window
+has little to see; AMLworld's accounts persist for days, and fan-in/fan-out and scatter–gather
+counts are exactly what the simulator's laundering typologies are made of.
+
+One caveat the aggregate hides: ordinary traffic in HI-Small stops on day 10 and the simulator
+then finishes its laundering patterns, so 59% of the last 1,100 transactions are positive. On the
+two realistic test days (8–9) GFP takes F1 from 0.10–0.20 to 0.38–0.45; on days 10–17 every model
+scores PR-AUC > 0.93 because almost everything left is laundering. The per-day curve is in
+`report/tables/amlworld_xgb_curves.csv`.
 
 ## Results tables
 
@@ -78,10 +86,15 @@ you did not know about leakage.
 
 | config | F1 | PR-AUC | P@R0.5 | P@R0.8 |
 |---|---|---|---|---|
-| xgb.base (6 transaction fields) | *pending* | | | |
-| xgb.base_gfp (+ GFP) | *pending* | | | |
-| sage.base | *pending* | | | |
-| sage.base_gfp | *pending* | | | |
+| xgb.base (6 transaction fields) | 0.209 | 0.109 | 0.090 | 0.034 |
+| xgb.base_gfp (+ GFP, 24 h window) | **0.540** | **0.521** | 0.570 | 0.099 |
+| sage.base | *Kaggle run pending — see `kaggle/amlworld_sage.md`* | | | |
+| sage.base_gfp | *Kaggle run pending* | | | |
+
+Three seeds; XGBoost with library defaults is deterministic so the interval is zero. The GraphSAGE
+edge model (learned account embeddings, `LinkNeighborLoader` with temporal sampling so no seed edge
+sees a later edge) is built and tested; the 10M-edge undirected graph does not fit the laptop's
+host memory alongside the sampler, so its rows come from a Kaggle P100 notebook.
 
 ## What didn't work, and what I would do next
 
@@ -149,12 +162,12 @@ Datasets are not downloaded automatically and never committed:
   `data/raw/amlworld/hi_small/`, from the
   [Kaggle dataset](https://www.kaggle.com/datasets/ealtman2019/ibm-transactions-for-anti-money-laundering-aml).
 
-The AMLworld XGBoost rows run on a 7 GB laptop (peak RSS ≈ 6 GB). The GraphSAGE edge rows need more
-host memory for the 10M-edge undirected graph and its sampler, so they ran on a Kaggle P100
-notebook: install the repo, symlink the mounted CSV into `data/raw/amlworld/hi_small/`, run the
-config, download `report/` and `mlruns/`. Set `dataset.max_days: 2` in the config to develop on a
-slice. Every number above is tagged in MLflow with the git commit, dataset version, feature-version
-hash, split hash and seed; the exports are in `report/exports/`.
+The AMLworld XGBoost rows run on a 7 GB laptop in 8 minutes (peak RSS 5.0 GB, of which the
+441 s GFP pass over 425 hourly batches is most of the time). The GraphSAGE edge rows need more host
+memory for the 10M-edge undirected graph and its sampler; `kaggle/amlworld_sage.md` has the three
+notebook cells that run the whole grid on a Kaggle P100. Set `dataset.max_days: 4` in the config to
+develop on a slice (cached separately). Every number above is tagged in MLflow with the git commit,
+dataset version, feature-version hash, split hash and seed; the exports are in `report/exports/`.
 
 ## Data and claims
 

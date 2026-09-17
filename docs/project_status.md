@@ -2,7 +2,7 @@
 
 **Last updated:** 17 Sep 2026
 **Current milestone:** portfolio v1.0
-**Overall state:** The Elliptic++ benchmark runs end to end on the laptop (50 fits in under nine minutes on an RTX 4060), with per-timestep curves that make the ~t43 dark-market collapse visible and a label-free drift monitor that reports lead time against it. AMLworld HI-Small loads as an edge task and the XGBoost rows run; the GraphSAGE edge head is in progress. The README and the public release are pending. The IBM Multi-GNN PNA reference row was dropped: its published configuration needs more than the laptop's 8 GB of GPU memory, and replicating it added nothing to the question.
+**Overall state:** The Elliptic++ benchmark runs end to end on the laptop (50 fits in under nine minutes on an RTX 4060), with per-timestep curves that make the ~t43 dark-market collapse visible and a calibrated label-free drift monitor that gives XGBoost 3–4 timesteps of warning (PSI / KS on features) while the score-shift detector misses the event. AMLworld HI-Small runs as an edge task: XGBoost F1 0.21 → 0.54 with causal GFP features (8 min, 5 GB RSS). The GraphSAGE edge head is built and tested; its AMLworld rows need the Kaggle P100 run in `kaggle/amlworld_sage.md`. The repository is public. The IBM Multi-GNN PNA reference row was dropped: its published configuration needs more than the laptop's 8 GB of GPU memory, and replicating it added nothing to the question.
 
 ## Checklist
 
@@ -10,9 +10,13 @@
 - [x] Per-timestep F1 / PR-AUC curves and figure; predictions persisted per run (`afe6ef5`)
 - [x] Drift monitor: PSI, KS, confidence shift on the validation reference; lead-time table and figure; `mulegraph drift` (`d322082`)
 - [x] AMLworld HI-Small loader as an edge task; per-edge GFP features; day-based temporal split; `xgb.base` and `xgb.base_gfp` rows (`a10c53c`)
-- [ ] GraphSAGE edge head on AMLworld (learned account embedding, `LinkNeighborLoader` with temporal sampling), run on a 16 GB GPU
-- [ ] README with the headline drift figure, both results tables, and a what-didn't-work section
-- [ ] Repository public; tag `v1.0`
+- [x] Drift thresholds calibrated on the reference window; sustained-drop rule (`df98d4f`)
+- [x] AMLworld HI-Small full-data XGBoost rows: F1 0.209 / 0.540, PR-AUC 0.109 / 0.521 (`report/tables/amlworld_xgb_results.csv`)
+- [x] GraphSAGE edge head (learned account embedding, `LinkNeighborLoader` with temporal sampling), tested on synthetic edge graphs (`5546a8d`)
+- [x] README with the headline drift figure, both results tables, and a what-didn't-work section
+- [x] Repository public
+- [ ] AMLworld SAGE rows from the Kaggle P100 run (`kaggle/amlworld_sage.md`), merged into the README
+- [ ] Tag `v1.0`
 
 ## Verified method notes
 
