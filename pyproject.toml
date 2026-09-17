@@ -28,6 +28,7 @@ dependencies = [
     "snapml==1.17.2",
     # Tracking (optuna returns with v1a search)
     "mlflow==3.16.0",
+    "matplotlib==3.11.1",
 ]
 
 [project.scripts]

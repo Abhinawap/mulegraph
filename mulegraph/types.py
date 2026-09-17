@@ -45,15 +45,16 @@ class DatasetMeta:
 
 @dataclass(frozen=True, eq=False)
 class GraphDataset:
-    """A time-stamped graph with labels; node ``i`` is row ``i`` of ``x``."""
+    """A time-stamped graph with labels; the unit ``y`` labels is a node or, on ``task="edge"``,
+    an edge (PR-D2)."""
 
-    x: np.ndarray  # float32 [N, F]
+    x: np.ndarray  # float32 [N, F]; F == 0 on an edge task
     edge_index: np.ndarray  # int64 [2, E]; row 0 source, row 1 target
     edge_attr: np.ndarray | None  # float32 [E, K] or None (Elliptic has no edge features)
     node_time: np.ndarray  # int64 [N]
     edge_time: np.ndarray  # int64 [E]
-    batch_id: np.ndarray  # int64 [N]; == node_time on Elliptic
-    y: np.ndarray  # int64 [N]; 1 illicit, 0 licit, -1 unknown
+    batch_id: np.ndarray  # int64 [units]; == node_time on Elliptic, the day on AMLworld
+    y: np.ndarray  # int64 [units]; 1 illicit, 0 licit, -1 unknown
     node_ids: np.ndarray  # int64 [N]; original ids
     task: Task
     meta: DatasetMeta
@@ -70,26 +71,32 @@ class GraphDataset:
             arr = getattr(self, name)
             if arr.dtype != np.int64:
                 raise TypeError(f"{name} must be int64, got {arr.dtype}")
-        for name in ("node_time", "batch_id", "y", "node_ids"):
+        if self.task == "edge" and self.edge_attr is None:
+            raise ValueError("an edge task needs edge_attr: the edge is the unit being scored")
+        units = e if self.task == "edge" else n
+        for name in ("node_time", "node_ids"):
             arr = getattr(self, name)
             if arr.shape != (n,):
                 raise ValueError(f"{name} must have shape [{n}], got {arr.shape}")
+        for name in ("batch_id", "y"):
+            arr = getattr(self, name)
+            if arr.shape != (units,):
+                raise ValueError(f"{name} must have shape [{units}], got {arr.shape}")
         if self.edge_time.shape != (e,):
             raise ValueError(f"edge_time must have shape [{e}], got {self.edge_time.shape}")
         if e and (self.edge_index.min() < 0 or self.edge_index.max() >= n):
             raise ValueError("edge_index refers to nodes outside [0, N)")
         if self.edge_attr is not None and self.edge_attr.shape[0] != e:
             raise ValueError(f"edge_attr must have {e} rows, got {self.edge_attr.shape[0]}")
-        if len(self.meta.feature_names) != self.x.shape[1]:
+        width = self.unit_features.shape[1]
+        if len(self.meta.feature_names) != width:
             raise ValueError(
                 f"meta.feature_names has {len(self.meta.feature_names)} entries "
-                f"but x has {self.x.shape[1]} columns"
+                f"but the unit features have {width} columns"
             )
         for name, (_, stop) in self.meta.feature_blocks.items():
-            if stop > self.x.shape[1]:
-                raise ValueError(
-                    f"feature_blocks[{name!r}] runs past x's {self.x.shape[1]} columns"
-                )
+            if stop > width:
+                raise ValueError(f"feature_blocks[{name!r}] runs past the {width} feature columns")
 
     @property
     def num_nodes(self) -> int:
@@ -98,6 +105,23 @@ class GraphDataset:
     @property
     def num_edges(self) -> int:
         return int(self.edge_index.shape[1])
+
+    @property
+    def num_units(self) -> int:
+        """Rows of ``y``: edges on an edge task, nodes otherwise."""
+        return self.num_edges if self.task == "edge" else self.num_nodes
+
+    @property
+    def unit_time(self) -> np.ndarray:
+        return self.edge_time if self.task == "edge" else self.node_time
+
+    @property
+    def unit_features(self) -> np.ndarray:
+        """Raw per-unit features: ``edge_attr`` on an edge task, ``x`` otherwise."""
+        if self.task == "edge":
+            assert self.edge_attr is not None
+            return self.edge_attr
+        return self.x
 
     @property
     def src(self) -> np.ndarray:

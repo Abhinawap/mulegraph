@@ -2,46 +2,44 @@
 
 ## Project Goals
 
-**What this is:** `mulegraph` — a benchmark and drift-monitoring toolkit answering whether GNNs beat a well-featured gradient-boosted model at detecting money-mule / laundering networks *under deployment-realistic temporal evaluation*, and whether either model's failure can be detected without labels.
-
-**Current milestone:** MVP (target 31 Oct 2026) — Elliptic++ only, two regimes.
-
-MVP is done when `mulegraph run --config configs/elliptic_mvp.yaml` produces a results table for `{xgb, sage} × {local, local+gfp}` plus the `xgb.raw165` reference row, on random and temporal splits, scored on fraud F1 / PR-AUC / P@R0.5 / P@R0.8, with every run logged to MLflow.
+**What this is:** `mulegraph` — a benchmark and drift-monitoring toolkit answering whether GNNs beat a well-featured gradient-boosted model at detecting money-mule / laundering networks *under deployment-realistic temporal evaluation*, and whether either model's failure can be detected without labels. A portfolio project: the repo, its README and its figures are the deliverable.
 
 **Expected finding:** graph *features* matter more than graph *models*. Confirming or overturning it is a result either way — never tune toward the expected answer.
 
+**Headline piece:** the label-free drift monitor's lead time on Elliptic's real t43 dark-market collapse (F1 0.85 → 0.02). The two-by-two benchmark on Elliptic++ and AMLworld HI-Small is the context for it.
+
 ## Architecture Overview
 
-Python CLI package. No server, no database, no UI. Everything is config-driven and cached to files keyed by content hash. Modules land with the milestone that needs them — `drift/`, `policies/` and `third_party/` do not exist yet.
+Python CLI package. No server, no database, no UI. Everything is config-driven and cached to files keyed by content hash.
 
 ```
 mulegraph/
-  cli.py            # Typer entry point: run / drift / simulate / report / smoke
-  config.py         # Pydantic schema for configs/*.yaml
+  cli.py            # Typer entry point: run / drift / smoke
+  config.py         # Pydantic schema for configs/*.yaml (RunConfig, DriftRunConfig)
   pipeline.py       # Orchestrator — the only module that knows all the others
-  types.py          # GraphDataset, Split, FeatureMatrix, Predictions
+  types.py          # GraphDataset, Split, FeatureMatrix, Predictions; a "unit" is a node or an edge
   util.py           # Paths, hashing, seeding, provenance
-  data/             # Loaders -> GraphDataset (timestamps preserved, cached)
-  features/         # Causal graph features via snapml GFP
-  splits/           # random | temporal | temporal_inductive + leakage assertions
-  models/           # xgb, sage (pna v1b) behind one fit/predict_proba/embed protocol
-  eval/             # Thresholding, metrics, seed t-intervals (paired gaps v1a)
-  drift/            # v2: PSI, KS, confidence shift, embedding MMD (label-free)
-  policies/         # v2: retraining policy replay under label lag
-  report/           # MLflow -> CSV tables + PNG figures
+  data/             # elliptic.py (node task), amlworld.py (edge task), synthetic.py -> GraphDataset
+  features/         # Causal graph features via snapml GFP; node_agg_v1 fold on node tasks
+  splits/           # random | temporal on batch_id + leakage assertions
+  models/           # xgb, sage behind one fit/predict_proba/embed protocol
+  eval/             # Thresholding, metrics, seed t-intervals, curves.py (per-timestep)
+  drift/            # detectors.py (PSI, KS, confidence shift), monitor.py (batch scores, lead time)
+  report/           # tables.py (MLflow -> CSV), figures.py (curves, drift PNG)
 configs/            # One YAML per experiment; validated with Pydantic
-third_party/        # v1b: vendored IBM Multi-GNN (PNA, GIN+EU)
 tests/
 docs/
 ```
 
-**Benchmark data flow:** config → validate → load/cache graph → causal features → split + leakage check → search once per (config, regime, dataset) → refit best config across 5 seeds → threshold on val → metrics + CIs → MLflow.
+**Benchmark data flow:** config → validate → load/cache graph → causal features → split + leakage check → fit each (regime, model, seed) → threshold on val → metrics + per-timestep curves → MLflow child run → tables + figures.
+
+**Drift data flow:** same to the fit, then score every unit from the validation window on → PSI / KS / confidence shift per batch against the validation reference → lead time against the F1 curve → tables + figure.
 
 **Component coupling rule:** every component depends only on the shared types in `types.py`. Only `pipeline.py` imports across subsystems.
 
 ## Tech Stack
 
-Python 3.11 · Typer · Pydantic · PyTorch 2.x + PyTorch Geometric · XGBoost 3.2 (newest supporting 3.11) · scikit-learn · MLflow (local SQLite file; the `file:` store is refused by MLflow 3) · pyarrow/Parquet · pytest · ruff · uv. Optuna lands with v1a, evidently with v2 — not before.
+Python 3.11 · Typer · Pydantic · PyTorch 2.x + PyTorch Geometric · XGBoost 3.2 (newest supporting 3.11) · scikit-learn · scipy · matplotlib · MLflow (local SQLite file; the `file:` store is refused by MLflow 3) · pyarrow/Parquet · pytest · ruff · uv.
 
 Deliberately absent: frontend, HTTP API, database server, cloud services, LLMs.
 
@@ -49,32 +47,25 @@ Deliberately absent: frontend, HTTP API, database server, cloud services, LLMs.
 
 - Every experiment is a YAML file in `configs/` — no experiment parameters as CLI flags beyond `--config`.
 - Long operations log progress; a run that will take hours says so at the start.
-- When the toolkit refuses something (e.g. `temporal_inductive` on Elliptic), the error says *why* in one sentence, referencing the dataset property that caused it.
+- When the toolkit refuses something, the error says *why* in one sentence, referencing the dataset property that caused it.
 - Results are files, not stdout: tables to `report/tables/`, figures to `report/figures/`.
 - Caches are keyed by `(dataset_version, feature_version, split_hash)` — never silently reuse a cache across a definition change.
 
 ## Constraints & Policies
 
-**Scientific integrity — MUST follow. These are the dissertation's defensibility:**
+**Scientific integrity — MUST follow. These are what make the numbers defensible:**
 - NEVER choose the decision threshold on test. Validation PR curve only (PR-E4).
 - NEVER let features see the future: only edges with `edge_time <= t` (PR-F2).
 - NEVER report accuracy as a headline metric (PR-E6).
 - `base` features NEVER include pre-aggregated neighbour features. On Elliptic `base` = 93 local features; the published 165-block is a separate `xgb.raw165` row (PR-M7).
-- Hyperparameter search is budgeted by **wall-clock**, identical for every model on a dataset. Trial counts are ceilings, not budgets. Trial 0 is always the fixed reference config (D2).
 - A gap is "significant" only if its paired-by-seed 95% t-interval excludes zero. Bootstrap bands are for per-timestep curves only and NEVER used to call a gap significant (PR-E3).
-- Drift injection deletes a typology's edges before batch T and keeps them with **true** labels from T onward. NEVER relabel (PR-R5).
-- Drift detectors NEVER see labels (PR-R2).
-- The split builder MUST reject `temporal_inductive` when `meta.cross_time_edges` is False (D1).
+- Drift detectors NEVER see labels (PR-R2). Labels enter only in the lead-time evaluation.
+- Every model runs its fixed reference configuration; runs log `trials_completed = 0` honestly (D2).
 
 **Reproducibility (NFR-1):**
 - Every MLflow run logs git commit, dataset version, feature version, split hash, and seed.
 - Pin dependencies in `pyproject.toml`; commit `uv.lock`.
-- If a number goes in the dissertation, it must be regenerable from a tagged commit.
-
-**Scope discipline (NFR-5):**
-- Nothing from "Later" or "Not in scope" is started before the v2 hard stop (13 Feb 2027).
-- Benchmark code freezes before Christmas 2026. Unfinished v1b work is cut, not carried.
-- If asked to add something outside the current milestone, say so before building it.
+- If a number goes in the README, it must be regenerable from a tagged commit.
 
 **Secrets & data:**
 - NEVER commit `.env`, `data/`, or `mlruns/`.
@@ -84,10 +75,10 @@ Deliberately absent: frontend, HTTP API, database server, cloud services, LLMs.
 
 All code is written under the **ponytail** skill (`/ponytail`, full level). Before writing anything, climb the ladder and stop at the first rung that holds: does it need to exist → already in this repo → stdlib → an installed dependency → one line → the minimum code that works.
 
-- **Current milestone only.** Config keys, protocol methods, types, modules and dependencies for v1a/v1b/v2 land with that milestone, not before (NFR-5). No accepted-but-ignored config fields, no unreachable branches kept "as a home" for later work.
-- **Docstrings are one line** plus the requirement id. Rationale lives in the spec, `docs/project_status.md` → *Verified method notes*, or the methods chapter.
+- **No scaffolding for later.** No accepted-but-ignored config fields, no unreachable branches kept "as a home" for future work.
+- **Docstrings are one line** plus the requirement id. Rationale lives in `docs/design.md`, `docs/project_status.md` → *Verified method notes*, or `docs/methods.md`.
 - **Integrity overrides ponytail.** Never simplify away leakage assertions, threshold-on-validation, causality guards, shape/dtype validation at type boundaries, or an error message that says why.
-- Run `/ponytail-review` on the diff before committing; run `/ponytail-audit` at each milestone boundary.
+- Run `/ponytail-review` on the diff before committing.
 
 ## Repository Etiquette
 
@@ -95,7 +86,6 @@ All code is written under the **ponytail** skill (`/ponytail`, full level). Befo
 - Run `ruff check .` and `pytest` before pushing. NEVER force push to `main`.
 - Commit messages describe the change and, where relevant, the requirement ID it satisfies (e.g. `PR-F2`).
 - Keep commits focused on single changes.
-- Work is tracked as GitHub issues, one per spec §1.3 milestone deliverable, on GitHub Milestones `MVP`/`v1a`/`v1b`/`v2`. Use `/issue <id|text>` to add one (it refuses Later/Not-in-scope items, NFR-5), `/close-issue <n> <sha>` to close with evidence, and `/issues-sync` to catch drift between issues and `docs/project_status.md`.
 
 ## Commands
 
@@ -106,10 +96,9 @@ uv run mulegraph --help
 
 # Benchmark
 uv run mulegraph run --config configs/elliptic_mvp.yaml
-uv run mulegraph drift --config configs/elliptic_drift.yaml       # v2
-uv run mulegraph simulate --config configs/elliptic_policies.yaml # v2
-uv run mulegraph report --milestone v1a
-uv run mulegraph smoke                     # <2 min, 2k-node subsample, used in CI
+uv run mulegraph run --config configs/amlworld_hi_small.yaml
+uv run mulegraph drift --config configs/elliptic_drift.yaml
+uv run mulegraph smoke                     # ~10 s, synthetic graph, used in CI
 
 # Quality
 uv run ruff check . && uv run ruff format .
@@ -126,26 +115,19 @@ CI (GitHub Actions) runs ruff, pytest with coverage, and `mulegraph smoke` on ev
 Required unit tests (NFR-2):
 - Loaders — shapes, dtypes, label counts, `meta.cross_time_edges` set correctly
 - Feature causality — on a **synthetic multi-timestep fixture**, features at `t` are identical with and without edges from `t+1…T`. Skipped with a logged reason on Elliptic, where it is vacuous.
-- Split integrity — empty train/test intersection, `max(train_time) < min(test_time)`, no test id in any training neighbourhood (inductive)
+- Split integrity — empty train/test intersection, `max(train_time) < min(test_time)`
 - Metrics — against hand-computed values
-- Detectors — monotonicity on synthetically shifted data
-- Policies — trigger logic under label lag
+- Detectors — monotonicity on synthetically shifted data; no detector signature accepts labels
 
 ## Documentation
 
-- [Project Spec](docs/project_spec.md) — requirements, design decisions D1–D4, requirement register (PR-*); §2 holds component contracts and data flow. **Source of truth; read before changing behaviour.**
-- [Project Status](docs/project_status.md) — current milestone progress, blockers, verified method notes
-- [Changelog](docs/changelog.md) — version history
-- [Viability review, Sep 2026](docs/viability_review_2026-09.md) — go/no-go after the first Elliptic run; positions the project against the 2019–2026 literature
+- [Design](docs/design.md) — the question, design decisions D1–D4, component contracts, requirement register (PR-*). **Source of truth; read before changing behaviour.**
+- [Methods](docs/methods.md) — the write-up of the method, results and related work
+- [Project Status](docs/project_status.md) — where things stand, verified method notes
+- [Changelog](docs/changelog.md) — history
 
 ## Maintaining This File
 
 Keep this file short — it loads into every session. Details belong in `docs/`.
 
-Update it when:
-- A milestone completes → change **Current milestone** and its done-criteria
-- A design decision changes in the spec → update **Constraints & Policies** to match
-- The package layout changes → update **Architecture Overview**
-- A command or workflow changes → update **Commands**
-
-Update `docs/project_status.md` and `docs/changelog.md` alongside code at every milestone and major addition.
+Update it when a design decision changes in `docs/design.md`, the package layout changes, or a command changes. Update `docs/project_status.md` and `docs/changelog.md` alongside code at every major addition.

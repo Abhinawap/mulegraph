@@ -78,33 +78,24 @@ def smoke(
 
 @app.command()
 def drift(config: ConfigOption) -> None:
-    """Run label-free drift detectors on a fitted model (v2)."""
-    _fail(
-        "drift is v2 (5 Jan - 13 Feb 2027): the detectors, batching and lead-time "
-        "reporting are not built yet.",
-        code=2,
-    )
+    """Fit, then flag post-training batches with label-free detectors and report lead time."""
+    from mulegraph.config import DriftRunConfig, load_config
+    from mulegraph.pipeline import run_drift
+    from mulegraph.splits.builder import RegimeNotSupportedError
 
+    try:
+        cfg = load_config(config, DriftRunConfig)
+    except FileNotFoundError as exc:
+        _fail(str(exc))
+    except ValueError as exc:
+        _fail(f"Invalid config {config}: {exc}")
 
-@app.command()
-def simulate(config: ConfigOption) -> None:
-    """Replay the test period under retraining policies (v2)."""
-    _fail(
-        "simulate is v2 (5 Jan - 13 Feb 2027): the retraining-policy simulator is not built yet.",
-        code=2,
-    )
+    try:
+        table = run_drift(cfg, config)
+    except (RegimeNotSupportedError, FileNotFoundError) as exc:
+        _fail(str(exc))
 
-
-@app.command()
-def report(
-    milestone: Annotated[str, typer.Option("--milestone", help="Milestone tag, e.g. v1a.")],
-) -> None:
-    """Regenerate dissertation tables and figures from MLflow (v1a)."""
-    _fail(
-        "report is v1a: paired gaps and per-timestep figures are not built yet, and "
-        "`mulegraph run` already writes report/tables/<experiment>_results.csv.",
-        code=2,
-    )
+    typer.secho(f"lead-time table: {table}", fg=typer.colors.GREEN)
 
 
 if __name__ == "__main__":  # pragma: no cover

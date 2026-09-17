@@ -7,12 +7,14 @@ makes without touching the real data.
 
 from __future__ import annotations
 
+from dataclasses import replace
 from pathlib import Path
 
 import numpy as np
 import pytest
 
 from mulegraph.config import RegimeConfig
+from mulegraph.data.synthetic import make_synthetic_elliptic
 from mulegraph.splits import builder
 from mulegraph.splits.builder import (
     RegimeNotSupportedError,
@@ -25,6 +27,52 @@ from mulegraph.types import GraphDataset
 
 TEMPORAL = RegimeConfig(regime="temporal", train_end=6, val=(7, 9), test=(10, 12))
 RANDOM = RegimeConfig(regime="random", fractions=(0.7, 0.15, 0.15), seed=0)
+
+
+def make_edge_ds(seed: int = 0) -> GraphDataset:
+    """AMLworld-shaped fixture: accounts recur across timesteps, the labelled unit is the edge."""
+    node = make_synthetic_elliptic(
+        n_nodes=300, n_timesteps=12, cross_time_edges=True, cross_time_fraction=0.4, seed=seed
+    )
+    order = np.argsort(node.edge_time, kind="stable")
+    rng = np.random.default_rng(seed)
+    e = node.num_edges
+    edge_index = node.edge_index[:, order].copy()
+    # Accounts recur: the last (latest) edges are sent by the senders of the first (earliest).
+    edge_index[0, -5:] = edge_index[0, :5]
+    meta = replace(
+        node.meta, feature_blocks={"local": (0, 2)}, feature_names=["amount", "fmt"], task="edge"
+    )
+    return GraphDataset(
+        x=np.zeros((node.num_nodes, 0), dtype=np.float32),
+        edge_index=edge_index,
+        edge_attr=rng.random((e, 2)).astype(np.float32),
+        node_time=node.node_time,
+        edge_time=node.edge_time[order],
+        batch_id=node.edge_time[order].copy(),
+        y=(rng.random(e) < 0.15).astype(np.int64),
+        node_ids=node.node_ids,
+        task="edge",
+        meta=meta,
+    )
+
+
+def test_edge_task_splits_edges_by_batch_id(tmp_path: Path) -> None:
+    """PR-E1 on an edge task: units are edges, chronology is on ``batch_id``, accounts may recur."""
+    data = make_edge_ds()
+    split = build_split(data, TEMPORAL, tmp_path)
+    parts = [split.train, split.val, split.test]
+
+    for a, b in ((0, 1), (0, 2), (1, 2)):
+        assert np.intersect1d(parts[a], parts[b]).size == 0
+    assert np.concatenate(parts).size == data.num_edges
+    day = data.batch_id
+    assert day[split.train].max() <= 6 < day[split.val].min()
+    assert day[split.val].max() <= 9 < day[split.test].min()
+    assert day[split.test].max() <= 12
+    # The node-task join check must not fire: an account in both periods is the dataset.
+    shared = np.intersect1d(data.edge_index[:, split.train], data.edge_index[:, split.test])
+    assert shared.size > 0
 
 
 @pytest.mark.parametrize("cfg", [RANDOM, TEMPORAL], ids=["random", "temporal"])

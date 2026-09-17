@@ -37,9 +37,11 @@ class SyntheticConfig(Strict):
 
 
 class DatasetConfig(Strict):
-    name: Literal["elliptic_pp", "synthetic_elliptic"]
+    name: Literal["elliptic_pp", "synthetic_elliptic", "amlworld"]
     version: str = "2023.1"
     synthetic: SyntheticConfig | None = None
+    #: AMLworld only: keep the first N days so the loader fits a small host; cached separately.
+    max_days: int | None = Field(None, ge=1)
 
     @model_validator(mode="after")
     def _synthetic_only_for_synthetic(self) -> DatasetConfig:
@@ -47,6 +49,8 @@ class DatasetConfig(Strict):
             raise ValueError("dataset.synthetic is only valid for name: synthetic_elliptic")
         if self.name == "synthetic_elliptic" and self.synthetic is None:
             object.__setattr__(self, "synthetic", SyntheticConfig())
+        if self.max_days is not None and self.name != "amlworld":
+            raise ValueError("dataset.max_days is only valid for name: amlworld")
         return self
 
 
@@ -220,7 +224,39 @@ class RunConfig(Strict):
         return len(self.models) * len(self.split.regimes) * len(self.seeds)
 
 
-def load_config(path: str | Path) -> RunConfig:
+class DriftConfig(Strict):
+    """Detector thresholds (PR-R1); the reference is always the validation window."""
+
+    detectors: list[Literal["psi", "ks", "conf"]] = Field(
+        default_factory=lambda: ["psi", "ks", "conf"], min_length=1
+    )
+    bins: int = Field(10, ge=2)
+    psi_flag: float = Field(0.2, gt=0.0)
+    ks_alpha: float = Field(0.01, gt=0.0, lt=1.0)
+    ks_frac: float = Field(0.2, gt=0.0, lt=1.0)
+    conf_flag: float = Field(0.1, gt=0.0, lt=1.0)
+    #: Replace the fixed flags with each detector's leave-one-out maximum inside the reference.
+    calibrate: bool = False
+    #: Relative F1 fall from the validation mean, sustained for ``drop_run`` batches, = broken.
+    f1_drop: float = Field(0.2, gt=0.0, lt=1.0)
+    drop_run: int = Field(2, ge=1)
+
+
+class DriftRunConfig(RunConfig):
+    drift: DriftConfig = Field(default_factory=DriftConfig)
+
+    @model_validator(mode="after")
+    def _one_temporal_regime(self) -> DriftRunConfig:
+        regimes = self.split.regimes
+        if len(regimes) != 1 or regimes[0].regime != "temporal":
+            raise ValueError(
+                "drift needs exactly one regime and it must be temporal: the reference is the "
+                "validation window and every scored batch must come after it in time (PR-R2)"
+            )
+        return self
+
+
+def load_config(path: str | Path, cls: type[RunConfig] = RunConfig) -> RunConfig:
     """Read and validate a YAML config; ``MULEGRAPH_FEATURE_BACKEND``/``_DEVICE`` override it."""
     path = Path(path)
     if not path.is_file():
@@ -238,4 +274,4 @@ def load_config(path: str | Path) -> RunConfig:
         raw["device"] = device
         log.info("MULEGRAPH_DEVICE=%s overrides device", device)
 
-    return RunConfig.model_validate(raw)
+    return cls.model_validate(raw)

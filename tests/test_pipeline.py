@@ -73,6 +73,21 @@ def test_run_benchmark_writes_the_results_table(tiny_config: RunConfig, tmp_path
     assert len({r["split_hash"] for r in rows}) == 1
 
 
+def test_run_benchmark_writes_per_timestep_curves_and_figure(
+    tiny_config: RunConfig, tmp_path: Path
+) -> None:
+    """PR-E5: one curve row per (fit, test timestep); the figure lands beside the tables."""
+    pipeline.run_benchmark(tiny_config, pipeline.SMOKE_CONFIG)
+
+    with open(tmp_path / "report" / "tables" / "pipeline_test_curves.csv", newline="") as fh:
+        rows = list(csv.DictReader(fh))
+    test_timesteps = 12 - 9 + 1
+    assert len(rows) == tiny_config.total_fits() * test_timesteps
+    assert {r["time"] for r in rows} == {str(t) for t in range(9, 13)}
+    assert {r["seed"] for r in rows} == {str(s) for s in SEEDS}
+    assert (tmp_path / "report" / "figures" / "pipeline_test_curves.png").stat().st_size > 0
+
+
 def test_threshold_is_never_chosen_on_test_rows(
     tiny_config: RunConfig, monkeypatch: pytest.MonkeyPatch
 ) -> None:

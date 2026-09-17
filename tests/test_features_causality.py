@@ -123,6 +123,40 @@ def test_removing_recent_past_does_change_those_rows(
     )
 
 
+@pytest.mark.parametrize("cutoff", CUTOFFS)
+def test_edge_features_ignore_edges_after_their_own_time(
+    causal_cfg: FeaturesConfig, tmp_path, cutoff: int
+) -> None:
+    """PR-F2 on an edge task: an edge's row does not move when later edges are added."""
+    from tests.test_splits import make_edge_ds
+
+    data = make_edge_ds()
+    keep = np.flatnonzero(data.edge_time <= cutoff)
+    # Edges are time-sorted, so the kept edges are a prefix and rows line up by position.
+    assert keep.size > 0 and np.array_equal(keep, np.arange(keep.size))
+    truncated = GraphDataset(
+        x=data.x,
+        edge_index=data.edge_index[:, keep],
+        edge_attr=data.edge_attr[keep],  # type: ignore[index]
+        node_time=data.node_time,
+        edge_time=data.edge_time[keep],
+        batch_id=data.batch_id[keep],
+        y=data.y[keep],
+        node_ids=data.node_ids,
+        task=data.task,
+        meta=data.meta,
+    )
+
+    full = _features(data, causal_cfg, tmp_path, f"edge_full_{cutoff}")
+    trunc = _features(truncated, causal_cfg, tmp_path, f"edge_trunc_{cutoff}")
+    assert full.shape[0] == data.num_edges
+    np.testing.assert_array_equal(
+        full[keep],
+        trunc,
+        err_msg=f"PR-F2 violation: edge rows at t <= {cutoff} changed when later edges were added",
+    )
+
+
 def test_causality_is_vacuous_without_cross_timestep_edges(
     synthetic_ds: GraphDataset, caplog: pytest.LogCaptureFixture
 ) -> None:

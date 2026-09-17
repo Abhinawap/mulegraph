@@ -17,6 +17,7 @@ def get_model(
     params: dict[str, Any],
     device: str = "cpu",
     sampler: SamplerConfig | None = None,
+    task: str = "node",
 ) -> BaseModel:
     """Instantiate a model by config name; ``sampler`` is ignored by xgb."""
     if name == "xgb":
@@ -24,6 +25,10 @@ def get_model(
 
         return XGBModel(params=params, device=device)
     if name == "sage":
+        if task == "edge":
+            from mulegraph.models.sage_edge import SAGEEdgeModel
+
+            return SAGEEdgeModel(params=params, device=device, sampler=sampler or SamplerConfig())
         from mulegraph.models.sage import SAGEModel
 
         return SAGEModel(params=params, device=device, sampler=sampler or SamplerConfig())

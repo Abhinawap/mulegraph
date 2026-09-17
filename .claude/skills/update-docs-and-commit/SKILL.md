@@ -36,10 +36,8 @@ Only where the change actually moves something:
   do not take the diff's word for it.
 - Move completed work into **What's been accomplished** with today's date.
 - Update **What's next** if the head of the list has been consumed.
-- Update the milestone table if a milestone changed state.
-- Refresh **Last updated**, and the days-to-milestone figure beside the current
-  milestone.
-- Update **Open blockers** and **Active risks** if either changed state.
+- Tick or add checklist items.
+- Refresh **Last updated** and **Overall state**.
 
 Keep the file about *now and next*. History belongs in the changelog.
 

@@ -64,10 +64,10 @@ def _random_split(data: GraphDataset, cfg: RegimeConfig) -> tuple[np.ndarray, ..
 
 
 def _temporal_split(data: GraphDataset, cfg: RegimeConfig) -> tuple[np.ndarray, ...]:
-    """Chronological partition; both val and test bounds are inclusive."""
+    """Chronological partition on ``batch_id``; both val and test bounds are inclusive."""
     assert cfg.train_end is not None and cfg.val is not None and cfg.test is not None
     idx = data.labelled_idx
-    time = data.node_time[idx]
+    time = data.batch_id[idx]
     train = idx[time <= cfg.train_end]
     val = idx[(time >= cfg.val[0]) & (time <= cfg.val[1])]
     test = idx[(time >= cfg.test[0]) & (time <= cfg.test[1])]
@@ -107,9 +107,11 @@ def check_leakage(
                 "PR-AUC is undefined and threshold selection is meaningless"
             )
 
-    if regime in TEMPORAL_REGIMES and data.meta.cross_time_edges:
+    if regime in TEMPORAL_REGIMES and data.meta.cross_time_edges and data.task == "node":
         # PR-E1: no test id in any training neighbourhood. Implied by time order when
         # timestep components are disconnected, so only checked where an edge can join them.
+        # On an edge task the units are the edges themselves, already disjoint by time; an
+        # account seen in both periods is the dataset, not leakage.
         in_train = np.zeros(data.num_nodes, dtype=bool)
         in_test = np.zeros(data.num_nodes, dtype=bool)
         in_train[train] = True
@@ -125,12 +127,12 @@ def check_leakage(
 
     if regime in TEMPORAL_REGIMES:
         for earlier, later in (("train", "val"), ("val", "test")):
-            hi = int(data.node_time[parts[earlier]].max())
-            lo = int(data.node_time[parts[later]].min())
+            hi = int(data.batch_id[parts[earlier]].max())
+            lo = int(data.batch_id[parts[later]].min())
             if hi >= lo:
                 raise ValueError(
-                    f"{regime}: max(node_time[{earlier}]) = {hi} is not < "
-                    f"min(node_time[{later}]) = {lo}; the split is not chronological"
+                    f"{regime}: max(batch_id[{earlier}]) = {hi} is not < "
+                    f"min(batch_id[{later}]) = {lo}; the split is not chronological"
                 )
 
 

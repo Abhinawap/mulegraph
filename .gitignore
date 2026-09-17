@@ -21,12 +21,15 @@ venv/
 htmlcov/
 coverage.xml
 
-# Data, caches, and experiment outputs (see project_spec.md 2.3).
+# Data, caches, and experiment outputs (see docs/design.md 3.5).
 # Anchored to the repository root so the `mulegraph/data/` package is still tracked.
+# Figures and the final tables are tracked: the README shows them. Smoke and dev outputs are not.
 /data/
 /mlruns/
-/report/figures/
-/report/tables/
+/report/tables/smoke_*
+/report/tables/*_dev_*
+/report/figures/smoke_*
+/report/figures/*_dev_*
 *.pt
 *.parquet
 *.npy
@@ -42,3 +45,4 @@ coverage.xml
 
 # uv
 .venv/
+.claude/worktrees/
