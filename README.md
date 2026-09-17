@@ -1,91 +1,166 @@
 # mulegraph
 
-A reproducible benchmark and drift-monitoring toolkit answering one question: **when evaluated
-the way a bank would have to deploy it, do graph neural networks beat a well-featured
-gradient-boosted model at detecting money-mule and laundering networks — and can we tell when
-either model stops working, without labels?**
+Do graph neural networks beat a well-featured gradient-boosted model at spotting money-laundering
+transactions **when you evaluate them the way a bank would have to deploy them** — trained on the
+past, scored on the future — and can you tell when either model stops working **without waiting for
+labels**?
 
-The expected finding is that graph *features* matter more than graph *models*. Confirming or
-overturning that under leakage-free evaluation is a result either way; nothing here is tuned
-toward the expected answer.
+Two public datasets, one leakage-free protocol, and a label-free drift monitor that is tested
+against a real model collapse.
 
-See [`docs/project_spec.md`](docs/project_spec.md) for the full specification (requirements,
-design decisions D1–D4, requirement register; §2 for component contracts), and
-[`docs/project_status.md`](docs/project_status.md) for current milestone progress and verified
-method notes.
+![Drift monitor on the Elliptic t43 collapse](report/figures/elliptic_drift_drift.png)
 
-## Status
+*Test F1 per timestep on Elliptic++ (black), the level below which the model counts as broken
+(dotted), the window where it stayed broken (red), and the first timestep each label-free detector
+raised a flag (dashed). For XGBoost the feature-drift detectors fire three to four timesteps before
+the collapse; the detector that watches the model's own scores never does.*
 
-**MVP** (due 31 Oct 2026): Elliptic++ only, two regimes, `{xgb, sage} × {base, base_gfp}` plus
-the `xgb.raw165` reference row. Hyperparameter search, per-timestep curves and paired gaps are
-v1a; the drift monitor and retraining simulator are v2.
+## What I found
 
-## Install
+**1. On Elliptic, the graph features did not help, and the graph model did worse.** Under the
+temporal split (train ≤ t34, validate t35–37, test t38–49), XGBoost on the 93 local features gets
+illicit-class F1 0.72; adding causal graph features (fan-in/out, degree, scatter–gather, short cycles
+computed only from past edges) leaves it at 0.72; GraphSAGE gets 0.59 ± 0.03 with or without them.
+The published 165-feature block — which already contains one hop of neighbour aggregation — is the
+best single row at 0.78. That is the same shape as Weber et al. (2019) and Maganti (2026) found.
 
-Requires Python 3.11 and [uv](https://docs.astral.sh/uv/). The environment is pinned in
-`uv.lock`; every dissertation number must be regenerable from a tagged commit (NFR-1).
+**2. The temporal mean hides two regimes.** Every config scores F1 0.8–0.95 on t38–42 and ≈ 0 from
+t43 on, when a dark-market shutdown changed what illicit activity looked like. The mean of 0.72 is
+"fine" averaged with "dead", which is why the per-timestep curve is the honest headline:
+
+![Per-timestep F1](report/figures/elliptic_mvp_curves.png)
+
+**3. Feature drift is visible before performance drift — if you calibrate the detector.** With
+textbook thresholds (PSI ≥ 0.2, KS p < 0.01) every test timestep is flagged from t38, which tells
+you nothing. Calibrating each detector on its own noise floor — the largest score any validation
+timestep gets against the other two — changes the picture:
+
+| model (features)   | detector           | first flag | F1 collapse | lead (timesteps) |
+|--------------------|--------------------|-----------:|------------:|-----------------:|
+| xgb (local + GFP)  | PSI on features    | t39        | t43         | **4**            |
+| xgb (local + GFP)  | KS on features     | t40        | t43         | **3**            |
+| xgb (local + GFP)  | KS on model scores | t49        | t43         | −6 (missed)      |
+| sage (local + GFP) | PSI on features    | t39        | t39         | 0                |
+| sage (local + GFP) | KS on features     | t40        | t39         | −1               |
+| sage (local + GFP) | KS on model scores | t39        | t39         | 0                |
+
+The input distribution moved at t39; XGBoost kept working for four more timesteps and then broke
+when the *relationship* between features and labels changed at t43. Watching the model's score
+distribution alone would have missed that entirely. GraphSAGE had already fallen 20% below its
+validation F1 by t39, so for it "drift" and "failure" arrive together.
+
+**4. On AMLworld the graph features matter a lot.** *(full-data run pending — see below)* On the
+first four days of HI-Small, XGBoost on the raw transaction fields gets PR-AUC 0.04; with the same
+causal graph features it gets 0.24. Elliptic's timesteps are disconnected components, so a
+one-timestep graph window has little to see; AMLworld's accounts persist, and fan-in/fan-out
+patterns are exactly what the simulator's laundering typologies are made of.
+
+## Results tables
+
+Mean ± half-width of the 95% across-seed *t*-interval, 5 seeds. XGBoost with library defaults is
+deterministic, so its interval is zero by construction, not by luck.
+
+**Elliptic++ (203k transactions, 49 timesteps), temporal split**
+
+| config | F1 | PR-AUC | P@R0.5 | P@R0.8 |
+|---|---|---|---|---|
+| xgb.base (93 local) | 0.722 | 0.726 | 0.983 | 0.196 |
+| xgb.base_gfp (93 local + GFP) | 0.718 | 0.715 | 0.998 | 0.159 |
+| sage.base | 0.591 ± 0.033 | 0.550 ± 0.038 | 0.705 ± 0.068 | 0.200 ± 0.011 |
+| sage.base_gfp | 0.560 ± 0.023 | 0.577 ± 0.031 | 0.652 ± 0.062 | 0.186 ± 0.014 |
+| xgb.raw165 (published block) | 0.778 | 0.739 | 0.995 | 0.194 |
+
+P@R0.8 ≈ 0.2 for everything: reaching 80% recall means reaching into the post-t43 cases no model
+finds. On the random split every config scores 0.90–0.96 F1, which is the number you would report if
+you did not know about leakage.
+
+**AMLworld HI-Small (5.1M transactions, 515k accounts, 0.10% laundering), IBM's day split 0–5 / 6–7 / 8–17**
+
+| config | F1 | PR-AUC | P@R0.5 | P@R0.8 |
+|---|---|---|---|---|
+| xgb.base (6 transaction fields) | *pending* | | | |
+| xgb.base_gfp (+ GFP) | *pending* | | | |
+| sage.base | *pending* | | | |
+| sage.base_gfp | *pending* | | | |
+
+## What didn't work, and what I would do next
+
+- **IBM's PNA reference configuration does not fit an 8 GB GPU.** Batch 8192 with 100×100
+  neighbour sampling ran out of memory at 11.9 GiB in the first backward pass. I spent a day on it
+  (a Python 3.9 + CUDA 11.8 environment, a SAGEConv swap into their GIN class) before deciding that
+  replicating their exact setting answered nothing about my question. The row is gone, not reduced.
+- **The first GraphSAGE run fed it unscaled inputs** (base columns up to |x| = 265, GFP counts up to
+  472 with 86% zeros). Trees don't care; a GNN does. I fixed the z-scoring on principle before looking
+  at how much it changed, because leaving it in would have biased the result toward the answer I
+  expected.
+- **snapml's GraphFeaturePreprocessor is causal only if you drive it correctly.** `partial_fit` then
+  `transform` inserts every batch twice and doubles every count; ingesting the whole table before
+  scoring leaks the future backwards. The only correct pattern is `transform(batch_t)` for *t*
+  ascending, and there is a test on a synthetic multi-timestep graph that would catch a regression.
+- **Textbook drift thresholds flag everything.** At a few thousand rows per timestep, KS at p < 0.01
+  rejects half the columns on every batch. The leave-one-out calibration above is the smallest fix
+  that gives a usable signal; a proper treatment would use a permutation test per batch.
+- **Not done:** a `temporal_inductive` regime on AMLworld (test accounts unseen in training), paired
+  significance tests between configs, and drift injection with known typologies. Each is a few days.
+
+## What is in the box
+
+```
+mulegraph/
+  cli.py          run / drift / smoke
+  pipeline.py     the only module that imports everything else
+  types.py        GraphDataset, FeatureMatrix, Split, Predictions — a "unit" is a node or an edge
+  data/           elliptic.py (node task), amlworld.py (edge task), synthetic.py
+  features/       causal graph features via snapml GFP, driven forward in time
+  splits/         random | temporal with leakage assertions (chronology, id overlap)
+  models/         xgb, sage (node task), sage_edge (edge task) behind one fit / predict_proba
+  eval/           threshold on validation only, metrics, seed t-intervals, per-timestep curves
+  drift/          PSI, KS, confidence shift; batch scoring; lead time
+  report/         MLflow → CSV tables, matplotlib figures
+configs/          one YAML per experiment
+tests/            169 tests on synthetic fixtures; the real-data tests are marked and skipped in CI
+docs/             design.md (decisions, contracts, requirement register), methods.md (write-up)
+```
+
+Rules the code enforces rather than documents: the decision threshold is chosen on the validation
+PR curve and a test spy asserts it never sees test rows; features at *t* use only edges at or before
+*t*; drift detectors take arrays, and a test checks that no detector signature accepts labels;
+accuracy is refused as a metric; a run from a dirty working tree is stamped `-dirty` in MLflow and
+in the CSV.
+
+## Reproduce
+
+Python 3.11 and [uv](https://docs.astral.sh/uv/). Everything is pinned in `uv.lock`.
 
 ```bash
 uv sync
-uv run mulegraph --help
-```
-
-The lockfile pulls `torch` built against CUDA 13.0 and `pyg-lib` from the PyG wheel index. On a
-machine without a GPU everything still runs on CPU — set `MULEGRAPH_DEVICE=cpu`, or use
-`sampler: {kind: full_batch}` in the config if `pyg-lib` is unavailable.
-
-## Data
-
-Datasets are **not** downloaded automatically and are never committed. Place (or symlink) the
-Elliptic++ transaction files where the loader expects them:
-
-```
-data/raw/elliptic_pp/2023.1/
-    txs_features.csv
-    txs_classes.csv
-    txs_edgelist.csv
-```
-
-The files come from [Elliptic++](https://github.com/git-disl/EllipticPlusPlus) (Elmougy & Liu,
-KDD '23). If you already have them elsewhere:
-
-```bash
-mkdir -p data/raw/elliptic_pp/2023.1
-for f in txs_features txs_classes txs_edgelist; do
-  ln -s /path/to/elliptic/$f.csv data/raw/elliptic_pp/2023.1/$f.csv
-done
-```
-
-Everything downstream is cached by content hash under `data/cache/`, so a change to a feature or
-split definition never silently reuses a stale cache.
-
-## Run
-
-```bash
-# Full MVP benchmark: 5 model configs x 2 regimes x 5 seeds, logged to MLflow
-uv run mulegraph run --config configs/elliptic_mvp.yaml
-
-# Two-minute end-to-end check on a synthetic Elliptic-shaped graph (used in CI)
-uv run mulegraph smoke
-
-# Browse the runs
+uv run mulegraph smoke                                            # 10 s, synthetic graph, CI
+uv run mulegraph run   --config configs/elliptic_mvp.yaml         # 50 fits, ~9 min on an RTX 4060
+uv run mulegraph drift --config configs/elliptic_drift.yaml       # the headline figure, ~3 min
+uv run mulegraph run   --config configs/amlworld_hi_small.yaml    # see below
 uv run mlflow ui --backend-store-uri sqlite:///mlruns/mlflow.db
 ```
 
-Results are files, not stdout: tables land in `report/tables/`, figures in `report/figures/`.
+Datasets are not downloaded automatically and never committed:
 
-## Development
+- Elliptic++ (Elmougy & Liu, KDD '23): `txs_features.csv`, `txs_classes.csv`, `txs_edgelist.csv`
+  under `data/raw/elliptic_pp/2023.1/`.
+- AMLworld HI-Small (Altman et al., NeurIPS '23): `HI-Small_Trans.csv` under
+  `data/raw/amlworld/hi_small/`, from the
+  [Kaggle dataset](https://www.kaggle.com/datasets/ealtman2019/ibm-transactions-for-anti-money-laundering-aml).
 
-```bash
-uv run ruff check . && uv run ruff format .
-uv run pytest -m "not elliptic" --cov=mulegraph   # tests needing the real dataset are marked
-uv run pytest -m elliptic                          # only once the raw CSVs are in place
-```
+The AMLworld XGBoost rows run on a 7 GB laptop (peak RSS ≈ 6 GB). The GraphSAGE edge rows need more
+host memory for the 10M-edge undirected graph and its sampler, so they ran on a Kaggle P100
+notebook: install the repo, symlink the mounted CSV into `data/raw/amlworld/hi_small/`, run the
+config, download `report/` and `mlruns/`. Set `dataset.max_days: 2` in the config to develop on a
+slice. Every number above is tagged in MLflow with the git commit, dataset version, feature-version
+hash, split hash and seed; the exports are in `report/exports/`.
 
-Branch before making changes (`feature/…` or `fix/…`); commits to `main` are refused by a hook.
+## Data and claims
 
-## Licence and data handling
+Both datasets are public and either pseudonymous (Bitcoin transactions) or synthetic (an agent-based
+simulator). No personal data, no bank data, and no claim that these numbers transfer to a real
+institution's transactions. What does transfer is the protocol: temporal splits, causal features,
+thresholds chosen on validation, and monitoring that does not wait for labels.
 
-Code is MIT. Elliptic++ is used under its published research licence. No personal data is
-processed — the datasets are public and pseudonymous or synthetic — and no claim is made that
-results on them generalise to real bank transactions (NFR-4).
+Code is MIT.
