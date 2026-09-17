@@ -12,7 +12,7 @@ from memory — the spec is the source of truth and it is version 0.6.
 
 ## Steps
 
-1. Grep `docs/project_spec.md` for the id. Ids appear in several forms, so
+1. Grep `docs/design.md` for the id. Ids appear in several forms, so
    search for the bare token rather than a fixed pattern:
    - `PR-*` requirements live in **Appendix A** (the requirement register)
    - `D1`–`D4` design decisions live in **§2.0**

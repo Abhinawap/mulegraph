@@ -2,7 +2,7 @@
 
 Every expected number below is derived by hand in a comment, because a metric
 tested against another implementation of itself is not tested at all — and these
-are the numbers the dissertation reports.
+are the numbers the results tables report.
 
 The shared fixture throughout:
 

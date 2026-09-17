@@ -98,26 +98,5 @@ def drift(config: ConfigOption) -> None:
     typer.secho(f"lead-time table: {table}", fg=typer.colors.GREEN)
 
 
-@app.command()
-def simulate(config: ConfigOption) -> None:
-    """Replay the test period under retraining policies (v2)."""
-    _fail(
-        "simulate is v2 (5 Jan - 13 Feb 2027): the retraining-policy simulator is not built yet.",
-        code=2,
-    )
-
-
-@app.command()
-def report(
-    milestone: Annotated[str, typer.Option("--milestone", help="Milestone tag, e.g. v1a.")],
-) -> None:
-    """Regenerate dissertation tables and figures from MLflow (v1a)."""
-    _fail(
-        "report is v1a: paired gaps and per-timestep figures are not built yet, and "
-        "`mulegraph run` already writes report/tables/<experiment>_results.csv.",
-        code=2,
-    )
-
-
 if __name__ == "__main__":  # pragma: no cover
     app()
