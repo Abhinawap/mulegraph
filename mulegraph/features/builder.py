@@ -62,6 +62,8 @@ def feature_definition(
         "node_columns": node_columns(layout),
         "dataset": meta.dataset,
         "dataset_version": meta.version,
+        # Rows are edges on an edge task, aggregated nodes otherwise: different matrices.
+        "unit": meta.task,
         # Same version string over different raw files must not share a cache (NFR-1).
         "raw_sha256": meta.raw_sha256,
     }
@@ -100,7 +102,7 @@ def _read_cache(path: Path, columns: list[str], time: np.ndarray) -> FeatureMatr
     ).astype(np.float32)
     cached_time = table.column("time").to_numpy(zero_copy_only=False).astype(np.int64)
     if not np.array_equal(cached_time, time):
-        raise ValueError(f"feature cache {path} was built for different node timestamps")
+        raise ValueError(f"feature cache {path} was built for different unit timestamps")
     return FeatureMatrix(
         values=values,
         columns=columns,
@@ -135,7 +137,8 @@ def build_features(
     *,
     force: bool = False,
 ) -> FeatureMatrix:
-    """Causal node-level graph features in node order, from ``<cache_dir>/features/`` if cached."""
+    """Causal graph features in unit order (per edge on an edge task), cached under
+    ``<cache_dir>/features/``."""
     if cfg.backend == "igraph":
         raise NotImplementedError(
             "igraph fallback is not built: snapml GFP installed in week-1 gate 1 (9 Sep 2026), "
@@ -144,27 +147,35 @@ def build_features(
 
     layout = probe_layout(cfg)
     fv = feature_version(cfg, data.meta, layout)
-    columns = [COLUMN_PREFIX + name for name in node_columns(layout)]
+    edge_task = data.task == "edge"
+    raw_columns = list(layout.columns) if edge_task else node_columns(layout)
+    columns = [COLUMN_PREFIX + name for name in raw_columns]
+    ids = np.arange(data.num_edges, dtype=np.int64) if edge_task else data.node_ids
     parquet_path = Path(cache_dir) / "features" / f"{fv}.parquet"
     json_path = parquet_path.with_suffix(".json")
 
     if parquet_path.is_file() and not force:
         log.info("features %s: cache hit at %s", fv, parquet_path)
-        cached = _read_cache(parquet_path, columns, data.node_time)
+        cached = _read_cache(parquet_path, columns, data.unit_time)
         if cached is not None:
             return cached
 
     times = np.unique(data.edge_time)
     log.info(
-        "features %s: computing %d columns for %d nodes over %d timesteps (%d edges)",
+        "features %s: computing %d columns for %d %ss over %d timesteps (%d edges)",
         fv,
         len(columns),
-        data.num_nodes,
+        data.num_units,
+        data.task,
         times.size,
         data.num_edges,
     )
     driver = GfpDriver(make_gfp_params(cfg), layout)
-    values = empty_node_features(data.num_nodes, layout)
+    values = (
+        np.zeros((data.num_edges, layout.width), dtype=np.float32)
+        if edge_task
+        else empty_node_features(data.num_nodes, layout)
+    )
     src_all, dst_all = data.src, data.dst
     per_timestep: dict[str, float] = {}
 
@@ -173,9 +184,12 @@ def build_features(
             mask = np.flatnonzero(data.edge_time == t)
             with Timer() as step:
                 edge_feats = driver.step(_batch(mask, src_all[mask], dst_all[mask], t))
-                node_agg_v1(
-                    values, edge_feats, src_all[mask], dst_all[mask], data.node_time, t, layout
-                )
+                if edge_task:
+                    values[mask] = edge_feats
+                else:
+                    node_agg_v1(
+                        values, edge_feats, src_all[mask], dst_all[mask], data.node_time, t, layout
+                    )
             per_timestep[str(t)] = round(step.seconds, 3)
             log.info("gfp t=%d edges=%d secs=%.2f", t, mask.size, step.seconds)
             if step.seconds > SLOW_TIMESTEP_SECONDS:
@@ -188,7 +202,7 @@ def build_features(
                 )
 
     log.info("features %s: done in %.1fs", fv, total.seconds)
-    _write_cache(parquet_path, values, data.node_ids, data.node_time, columns)
+    _write_cache(parquet_path, values, ids, data.unit_time, columns)
     write_json(
         json_path,
         {
@@ -205,7 +219,7 @@ def build_features(
     return FeatureMatrix(
         values=values,
         columns=columns,
-        time=data.node_time,
+        time=data.unit_time,
         feature_version=fv,
         name="gfp",
         blocks={"gfp": (0, len(columns))},
