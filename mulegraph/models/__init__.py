@@ -26,10 +26,9 @@ def get_model(
         return XGBModel(params=params, device=device)
     if name == "sage":
         if task == "edge":
-            raise NotImplementedError(
-                "sage scores nodes; an edge task (AMLworld) needs the edge head, "
-                "which is not built yet"
-            )
+            from mulegraph.models.sage_edge import SAGEEdgeModel
+
+            return SAGEEdgeModel(params=params, device=device, sampler=sampler or SamplerConfig())
         from mulegraph.models.sage import SAGEModel
 
         return SAGEModel(params=params, device=device, sampler=sampler or SamplerConfig())
