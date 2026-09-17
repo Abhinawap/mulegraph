@@ -78,12 +78,24 @@ def smoke(
 
 @app.command()
 def drift(config: ConfigOption) -> None:
-    """Run label-free drift detectors on a fitted model (v2)."""
-    _fail(
-        "drift is v2 (5 Jan - 13 Feb 2027): the detectors, batching and lead-time "
-        "reporting are not built yet.",
-        code=2,
-    )
+    """Fit, then flag post-training batches with label-free detectors and report lead time."""
+    from mulegraph.config import DriftRunConfig, load_config
+    from mulegraph.pipeline import run_drift
+    from mulegraph.splits.builder import RegimeNotSupportedError
+
+    try:
+        cfg = load_config(config, DriftRunConfig)
+    except FileNotFoundError as exc:
+        _fail(str(exc))
+    except ValueError as exc:
+        _fail(f"Invalid config {config}: {exc}")
+
+    try:
+        table = run_drift(cfg, config)
+    except (RegimeNotSupportedError, FileNotFoundError) as exc:
+        _fail(str(exc))
+
+    typer.secho(f"lead-time table: {table}", fg=typer.colors.GREEN)
 
 
 @app.command()

@@ -1,0 +1,48 @@
+# Label-free drift monitor on the Elliptic++ temporal split.
+#
+#   uv run mulegraph drift --config configs/elliptic_drift.yaml
+#
+# Reference = the validation timesteps (t35-37). Every timestep from t38 on is
+# scored by PSI / KS on the features and KS on the model's scores, with no
+# labels; the lead-time table compares each detector's first flag with the
+# first timestep where test F1 falls 20% below the validation mean (the ~t43
+# dark-market shutdown).
+
+dataset:
+  name: elliptic_pp
+  version: "2023.1"
+
+features:
+  backend: gfp
+  families: [fan, degree, scatter_gather, lc_cycle]
+  bins: [2, 4, 8, 16, 32]
+  window: 1
+  cycle_len: 10
+  vertex_stats: true
+  num_threads: 8
+
+split:
+  regimes:
+    - regime: temporal
+      train_end: 34
+      val: [35, 37]
+      test: [38, 49]
+
+models:
+  - {name: xgb,  features: base_gfp}
+  - {name: sage, features: base_gfp, sampler: {kind: neighbor, fanout: [15, 10]}}
+
+seeds: [0, 1, 2, 3, 4]
+
+drift:
+  detectors: [psi, ks, conf]
+  bins: 10
+  psi_flag: 0.2
+  ks_alpha: 0.01
+  ks_frac: 0.2
+  f1_drop: 0.2
+
+mlflow:
+  experiment: elliptic_drift
+
+device: auto

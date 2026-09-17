@@ -13,8 +13,9 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-from mulegraph.config import ModelConfig, RunConfig, load_config
+from mulegraph.config import DriftRunConfig, ModelConfig, RunConfig, load_config
 from mulegraph.data import load_dataset
+from mulegraph.drift.monitor import lead_time, score_batches
 from mulegraph.eval.curves import CURVE_METRICS, per_timestep
 from mulegraph.eval.metrics import EXTRA_KEYS, compute_metrics
 from mulegraph.eval.threshold import choose_threshold
@@ -22,7 +23,7 @@ from mulegraph.features.builder import build_features
 from mulegraph.features.select import select_features
 from mulegraph.models import get_model
 from mulegraph.models.base import BaseModel
-from mulegraph.report.figures import plot_curves
+from mulegraph.report.figures import plot_curves, plot_drift
 from mulegraph.report.tables import write_results_table
 from mulegraph.splits.builder import build_split
 from mulegraph.types import FeatureMatrix, GraphDataset, Predictions, Split
@@ -162,8 +163,8 @@ def _fit_one(
     return Fitted(model, threshold, val, test, curve)
 
 
-def run_benchmark(cfg: RunConfig, config_path: Path) -> Path:
-    """Load, build features, split, fit across seeds, evaluate, write the table."""
+def _prepare(cfg: RunConfig) -> tuple[Paths, str, str, str]:
+    """Point MLflow at the store and stamp the run: ``(paths, tracking_uri, device, commit)``."""
     import mlflow
 
     paths = Paths.from_env()
@@ -183,7 +184,14 @@ def run_benchmark(cfg: RunConfig, config_path: Path) -> Path:
             "tagged commit, so its runs are stamped %s (NFR-1)",
             commit,
         )
+    return paths, tracking_uri, device, commit
 
+
+def run_benchmark(cfg: RunConfig, config_path: Path) -> Path:
+    """Load, build features, split, fit across seeds, evaluate, write the table."""
+    import mlflow
+
+    paths, tracking_uri, device, commit = _prepare(cfg)
     data = load_dataset(cfg.dataset, paths.data_dir)
     cache_dir = paths.cache_dir(cfg.dataset.name, cfg.dataset.version)
 
@@ -270,6 +278,83 @@ def run_benchmark(cfg: RunConfig, config_path: Path) -> Path:
         tracking_uri=tracking_uri,
         parent_run_id=parent.info.run_id,
     )
+
+
+def run_drift(cfg: DriftRunConfig, config_path: Path) -> Path:
+    """Fit, then score every post-training batch label-free and report lead time (PR-R2, PR-R4)."""
+    import mlflow
+
+    paths, tracking_uri, device, commit = _prepare(cfg)
+    regime_cfg = cfg.split.regimes[0]
+    assert regime_cfg.val is not None and regime_cfg.test is not None
+    data = load_dataset(cfg.dataset, paths.data_dir)
+    cache_dir = paths.cache_dir(cfg.dataset.name, cfg.dataset.version)
+    gfp = build_features(data, cfg.features, cache_dir) if cfg.needs_gfp else None
+    matrices = {m.features: select_features(data, gfp, m.features) for m in cfg.models}
+    split = build_split(data, regime_cfg, cache_dir)
+
+    ref_batches = np.arange(regime_cfg.val[0], regime_cfg.val[1] + 1)
+    # Every unit from the reference window onward, labelled or not: the monitor sees
+    # what a deployed model sees, and labels never reach a detector (PR-R2).
+    scored_idx = np.flatnonzero(
+        (data.batch_id >= regime_cfg.val[0]) & (data.batch_id <= regime_cfg.test[1])
+    )
+    batch = data.batch_id[scored_idx]
+
+    log.info(
+        "%s: %d fits, then %d batches scored against reference batches %s..%s",
+        cfg.mlflow.experiment,
+        cfg.total_fits(),
+        len(np.unique(batch)) - len(ref_batches),
+        ref_batches[0],
+        ref_batches[-1],
+    )
+    scores, leads, curves = [], [], []
+    with mlflow.start_run(run_name=f"{cfg.mlflow.experiment}.{commit}"):
+        mlflow.set_tags({"kind": "parent", "dataset": data.meta.dataset, "git_commit": commit})
+        mlflow.log_params({"dataset_version": data.meta.version, "seeds": list(cfg.seeds)})
+        mlflow.log_artifact(str(config_path))
+        for model_cfg in cfg.models:
+            feats = matrices[model_cfg.features]
+            for seed in cfg.seeds:
+                log.info("fit %s seed %d", model_cfg.key, seed)
+                fitted = _fit_one(cfg, data, feats, split, model_cfg, seed, device, commit)
+                proba = fitted.model.predict_proba(data, feats, scored_idx)
+                table = score_batches(
+                    feats.values[scored_idx],
+                    proba,
+                    batch,
+                    ref_batches,
+                    detectors=cfg.drift.detectors,
+                    bins=cfg.drift.bins,
+                    psi_flag=cfg.drift.psi_flag,
+                    ks_alpha=cfg.drift.ks_alpha,
+                    ks_frac_flag=cfg.drift.ks_frac,
+                )
+                ref_f1 = float(per_timestep(fitted.val, fitted.threshold)["f1"].mean())
+                lead = lead_time(fitted.curve, table, ref_f1, cfg.drift.f1_drop)
+                tag = {"model": model_cfg.name, "features": model_cfg.features, "seed": seed}
+                scores.append(table.assign(**tag))
+                leads.append(lead.assign(ref_f1=ref_f1, **tag))
+                curves.append(fitted.curve.assign(**tag))
+
+        tables_dir = paths.tables_dir()
+        tables_dir.mkdir(parents=True, exist_ok=True)
+        stem = cfg.mlflow.experiment
+        score_path = tables_dir / f"{stem}_scores.csv"
+        lead_path = tables_dir / f"{stem}_lead_time.csv"
+        pd.concat(scores, ignore_index=True).to_csv(score_path, index=False)
+        lead_table = pd.concat(leads, ignore_index=True)
+        lead_table.to_csv(lead_path, index=False)
+        figure = plot_drift(
+            pd.concat(curves, ignore_index=True),
+            lead_table,
+            paths.figures_dir() / f"{stem}_drift.png",
+        )
+        for artifact in (score_path, lead_path, figure):
+            mlflow.log_artifact(str(artifact))
+    log.info("wrote %s and %s", score_path, lead_path)
+    return lead_path
 
 
 def run_smoke(keep: bool = False) -> Path:

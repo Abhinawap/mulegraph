@@ -220,7 +220,35 @@ class RunConfig(Strict):
         return len(self.models) * len(self.split.regimes) * len(self.seeds)
 
 
-def load_config(path: str | Path) -> RunConfig:
+class DriftConfig(Strict):
+    """Detector thresholds (PR-R1); the reference is always the validation window."""
+
+    detectors: list[Literal["psi", "ks", "conf"]] = Field(
+        default_factory=lambda: ["psi", "ks", "conf"], min_length=1
+    )
+    bins: int = Field(10, ge=2)
+    psi_flag: float = Field(0.2, gt=0.0)
+    ks_alpha: float = Field(0.01, gt=0.0, lt=1.0)
+    ks_frac: float = Field(0.2, gt=0.0, lt=1.0)
+    #: Relative F1 fall from the validation mean that counts as the model breaking.
+    f1_drop: float = Field(0.2, gt=0.0, lt=1.0)
+
+
+class DriftRunConfig(RunConfig):
+    drift: DriftConfig = Field(default_factory=DriftConfig)
+
+    @model_validator(mode="after")
+    def _one_temporal_regime(self) -> DriftRunConfig:
+        regimes = self.split.regimes
+        if len(regimes) != 1 or regimes[0].regime != "temporal":
+            raise ValueError(
+                "drift needs exactly one regime and it must be temporal: the reference is the "
+                "validation window and every scored batch must come after it in time (PR-R2)"
+            )
+        return self
+
+
+def load_config(path: str | Path, cls: type[RunConfig] = RunConfig) -> RunConfig:
     """Read and validate a YAML config; ``MULEGRAPH_FEATURE_BACKEND``/``_DEVICE`` override it."""
     path = Path(path)
     if not path.is_file():
@@ -238,4 +266,4 @@ def load_config(path: str | Path) -> RunConfig:
         raw["device"] = device
         log.info("MULEGRAPH_DEVICE=%s overrides device", device)
 
-    return RunConfig.model_validate(raw)
+    return cls.model_validate(raw)
