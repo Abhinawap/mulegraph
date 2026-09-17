@@ -1,194 +1,41 @@
 # Project Status
 
-**Last updated:** 16 Sep 2026
-**Current milestone:** MVP — due 31 Oct 2026 (45 days out)
-**Spec version:** 0.8
-**Overall state:** The MVP definition of done is met. `mulegraph run --config configs/elliptic_mvp.yaml` ran on real Elliptic++ at `ec4501f`: 50 fits in under 9 minutes on the RTX 4060, the results table in `report/tables/elliptic_mvp_results.csv`, every child run tagged in MLflow (parent `341e0f93709f487187f8ca276ff60d6a`). Merged to `main` at `dd85dec` (CI green, #13 closed); tag `mvp` on the merge of the closeout PR #29, which carries the MLflow export. Week-1 gate 2 is cleared and W = 120 min for Elliptic. Gate 4 is cleared: HI-Small spans 17.7 days nominally but only 10 days of ordinary traffic. Gates 3 and 5 are **blocked on compute**: IBM's PNA and SAGE settings need more than the laptop's 8 GB of GPU memory. The methods chapter draft is written (`docs/methods_draft.md`, #8). Still open on the MVP milestone: gates 3 and 5 (#1), supervisor review of the draft (#8), and the supervisor questions (#9), where compute access is now the blocker.
+**Last updated:** 17 Sep 2026
+**Current milestone:** portfolio v1.0
+**Overall state:** The Elliptic++ benchmark runs end to end on the laptop (50 fits in under nine minutes on an RTX 4060), with per-timestep curves that make the ~t43 dark-market collapse visible and a label-free drift monitor that reports lead time against it. AMLworld HI-Small loads as an edge task and the XGBoost rows run; the GraphSAGE edge head is in progress. The README and the public release are pending. The IBM Multi-GNN PNA reference row was dropped: its published configuration needs more than the laptop's 8 GB of GPU memory, and replicating it added nothing to the question.
 
----
+## Checklist
 
-## Milestones
-
-| Milestone | Due | Status | Headline |
-|---|---|---|---|
-| Spec v0.6 | 8 Sep 2026 | ✅ Done | Requirements, design decisions D1–D4, requirement register |
-| Scaffolding | 9 Sep 2026 | ✅ Done | `CLAUDE.md`, docs, `.env.example`, `.gitignore` |
-| Week-1 gates | Sep 2026 | 🔵 In progress | 3 of 5 clear — GFP installs; Elliptic W = 120 min; HI-Small span read. Gates 3 and 5 blocked: AMLworld reference fits need a GPU with more than 8 GB |
-| **MVP** | **31 Oct 2026** | 🔵 **In progress** | Definition of done met 15 Sep (`ec4501f`); merged 16 Sep (`dd85dec`), tagged `mvp` at the #29 merge; #1 gates 3–5, #8 methods draft, #9 supervisor still open |
-| v1a | 21 Nov 2026 | ⬜ Not started | Elliptic complete: search decoupled from seeds, seed CIs, paired gaps, per-timestep curves, CI green |
-| v1b | 12 Dec 2026 | ⬜ Not started | AMLworld HI-Small, three regimes, PNA reference row — **scope negotiable** |
-| Benchmark freeze | before Christmas 2026 | ⬜ Not started | Code frozen; unfinished v1b work is cut, not carried |
-| v2 | 5 Jan – 13 Feb 2027 | ⬜ Not started | Drift monitor, typology-shift events, retraining simulator, one-command reporting. **Hard stop.** |
-| Later | — | ⬜ Deferred | PNA on remaining regimes, actor graph, TGN, Ethereum, explanations, cost-sensitive thresholds |
-
----
-
-## What's been accomplished
-
-**8 Sep 2026 — Specification (spec v0.6)**
-- Full spec written: product requirements, milestone table, NFR-1…5, success criteria S1–S5, risk table with fallback ladders, technical design, requirement register (PR-*).
-- Four design decisions resolved before any code: D1 graph unit, D2 search budget, D3 feature × model lineup, D4 label lag and batch unit.
-- v1 split into v1a (Elliptic) and v1b (AMLworld) so the Elliptic result stands on its own if AMLworld slips.
-- Statistics settled in advance: seed-level t-intervals headline, paired-by-seed gaps for significance, bootstrap confined to per-timestep bands.
-
-**9 Sep 2026 — Repository scaffolding**
-- `CLAUDE.md` written as project memory, with the scientific-integrity constraints (no test-set thresholding, no future edges, `base` excludes pre-aggregated neighbours, equal wall-clock budget, never relabel) stated as hard rules tied to their requirement ids.
-- `docs/architecture.md`, `docs/project_status.md`, `docs/changelog.md` created.
-- `.env.example` and `.gitignore` created; `report/exports/` deliberately kept tracked so milestone MLflow exports are committed.
-- `.claude/` project tooling added and committed with the repo, so the environment versions alongside the code (NFR-1): a commit guard on the default branch, session-start state injection read from this file, `/update-docs-and-commit` and `/req` commands, and an `integrity-auditor` agent that audits diffs against the requirement register. The agent exists to compensate for having no second reader.
-
-**9 Sep 2026 — Week-1 gate 1 cleared: GFP backend confirmed**
-- `snapml==1.17.2` installs from a wheel on Python 3.11 / linux x86_64 with no build step and no non-Python dependencies. **GFP is the feature backend; the `igraph` fallback is not needed** and that risk is retired.
-- `GraphFeaturePreprocessor` exposes every feature family the spec names as a native parameter: `fan`, `degree`, `scatter-gather`, `lc-cycle` (with `lc-cycle_len` defaulting to 10, matching the spec's cycle bound), plus `temp-cycle` and `vertex_stats`. Each has its own `_tw` time window, so the per-dataset window config in spec §2.5 maps onto the API directly.
-- **GFP is not causal by construction — only by usage.** It is stateful, and `transform` *itself* inserts the batch into the in-memory graph before scoring it. Ingesting a whole table before transforming leaks the future backwards: verified on a toy fixture where a transaction at *t1* gained neighbour statistics generated by an edge at *t2*. The only correct drive pattern is **`transform(batch_t)` alone, for t ascending — never `partial_fit`**, which would insert each batch a second time and double every degree, fan and histogram count (verified: a vertex with 2 out-edges reports 4). Batch order within a timestep does not matter, since `transform` inserts the whole batch before scoring any edge. PR-F2 therefore constrains `features/`, not just the config, and the synthetic-fixture causality test is what guards it.
-- Output is deterministic: bit-identical across repeated runs and across `num_threads` 1 vs 12 (NFR-1).
-- **Cost warning for the `W` arithmetic:** `lc-cycle_len: 10` is superlinear in graph density. 4,000 edges over 400 nodes did not finish in 3 minutes; the same 4,000 edges over 3,000 nodes completed in seconds. Elliptic's per-timestep components are sparse so this should be safe, but the cycle bound must be timed on real data in gate 2 and treated as a tunable if it eats into `W`.
-- Probed hardware: **RTX 4060 Laptop GPU** present, so gates 2–4 are not blocked on BlueBEAR access.
-
-**9 Sep 2026 — MVP component modules**
-- Elliptic++ loader and leak-checked splits (`d0fbcc3`; PR-D1, PR-D4, PR-E1, D1): only the 165 published features enter `x`; `cross_time_edges` is computed, not asserted; the published 2023.1 counts are checked; random and temporal splits run their leakage assertions on every build.
-- Causal GFP features with `node_agg_v1` aggregation (`e6625d7`; PR-F1–F3, PR-M7): a forward-only driver, a probed output layout, `base` / `base_gfp` / `raw165` selection, and the synthetic-fixture causality test.
-- GraphSAGE with neighbour sampling (`dfd13ab`; PR-M3, PR-M5); XGBoost, validation-only thresholding, metrics, seed t-intervals and the MLflow results table (`0ccdfbf`; PR-M1, PR-M2, PR-E2–E4, PR-E6).
-- MLflow tracking moved to a local SQLite file (`7c9133e`) because MLflow 3 refuses the `file:` store.
-
-**9 Sep 2026 — Repository on GitHub with issue tracking**
-- `Abhinawap/mulegraph` (private) now holds `main`, `feature/gfp-backend-decision` and `feature/mvp-elliptic`.
-- Four GitHub Milestones with the spec's due dates (MVP 31 Oct, v1a 21 Nov, v1b 12 Dec, v2 13 Feb 2027) and **25 issues, one per §1.3 milestone deliverable**, each listing its PR-* ids, done-criteria and the integrity constraints that apply. Five MVP deliverables already delivered are closed citing their commits (#2–#6); #25 is a closed "not planned" guard listing every Later / Not-in-scope item (NFR-5).
-- Three Claude Code commands keep GitHub and this file in step: `/issue` (spec-aware create, refuses out-of-scope), `/close-issue` (close with commit evidence, tick the line here), `/issues-sync` (report disagreements, past-due milestones, open gate/supervisor blockers).
-
-**10 Sep 2026 — Ponytail audit and cleanup** (`05ba7c5`)
-- Removed ahead-of-milestone scaffolding — the v1a search module, `DriftSignal`, accepted-but-ignored config keys, `optuna`, `python-dotenv` — and the duplicate `docs/architecture.md`; net −1,100 lines. Docstrings cut to one line; their verified findings now live in *Verified method notes* below.
-- The integrity-auditor found no violations. Its follow-ups are in: XGBoost merges trial 0 in its constructor, the reporter refuses runs missing a tag, `feature_version` hashes `raw_sha256`.
-- `CLAUDE.md` now makes the ponytail skill the building rule, with integrity guards overriding it.
-- Test suite: 149 passed, 1 skipped (the vacuous Elliptic causality case), including 10 loader tests on the real Elliptic++ files.
-
-**15 Sep 2026 — Pipeline wired end to end** (#7)
-- `pipeline.py` now orchestrates the run: load → causal features (once per dataset+config) → select per model → split per regime → fit each (regime, model, seed) → threshold on validation → score test → one MLflow child run each → results table. Splits are built before the first fit, so an undefined regime fails immediately rather than after hours of fitting (D1).
-- `mulegraph smoke` runs the full five-config × two-seed grid on the synthetic graph in **10 seconds** on CPU, well inside its two-minute budget, and writes `report/tables/smoke_results.csv`.
-- Each child run is tagged `dataset, regime, model, features, feature_version, split_hash, git_commit` — exactly what the reporter refuses to guess (PR-O1) — and logs `trials_completed = 0` with `trial0_source`, the honest zero for a milestone with no search (D2). Counts and point precision/recall are logged under `diag_*` so the results table stays the requested metrics only.
-- Three pipeline tests, including a spy asserting `choose_threshold` is only ever handed the validation set, exactly, on every fit (PR-E4). Suite: 153 passed, 1 skipped.
-
-**15 Sep 2026 — CI runs the smoke check** (`a569285`)
-- CI now runs `mulegraph smoke` after the tests; until this commit it ran lint, format and tests only, despite `CLAUDE.md` saying otherwise. First run green: smoke 10 s, whole job ~3 min.
-- The uv cache had been saving 0.1 MB: setup-uv's default `prune-cache` drops PyPI wheels, so every run re-downloaded ~3 GB of torch/CUDA wheels and the sync step swung from 1 min to 11½ min with PyPI throughput. `prune-cache: false` now keeps a 3.37 GB cache per `uv.lock`. A cache-restored run takes ~2 min to restore and 4 s to sync: slower than a fast PyPI day (36 s), but steady. Kept for that predictability.
-
-**15 Sep 2026 — MVP run on real Elliptic++** (#7; `ec4501f`)
-- `configs/elliptic_mvp.yaml` runs end to end on the real data: 2 regimes × 5 model configs × 5 seeds = 50 fits, 1 MLflow parent (`341e0f93709f487187f8ca276ff60d6a`) + 50 children, each tagged `git_commit, dataset_version, feature_version, split_hash, seed`; `report/tables/elliptic_mvp_results.csv` has 50 rows. GFP features for all 49 timesteps take ~2 s.
-- A first run at `a64a16e` (parent `281caef1ade34e42aecd51bf2ab1e8a8`) exposed unscaled SAGE inputs; SAGE was fixed in `ec4501f` and the grid rerun. XGBoost rows are bit-identical across the two runs.
-- **Gate 2:** `sage.base_gfp` temporal seed 0 fits in 23.1 s; the slowest of the 50 fits is 44.3 s. W = max(120 min, 2 × 44 s) = **120 min** on Elliptic.
-- Temporal test F1 (mean over seeds): `xgb.raw165` 0.778, `xgb.base` 0.722, `xgb.base_gfp` 0.718, `sage.base` 0.593 ± 0.020, `sage.base_gfp` 0.566 ± 0.019. No gap is called significant until paired intervals land (#11, #27).
-- The split hash in #4 was corrected to `f576c23d95a59084` (same partition; the old value omitted `raw_sha256`).
-
-**16 Sep 2026 — MVP merged and tagged**
-- PR #28 merged to `main` as a merge commit (`dd85dec`), so every branch SHA the docs cite (`ec4501f`, `a64a16e`, `d0fbcc3`) stays reachable. Tag `mvp` first placed on `dd85dec`, then moved to the #29 merge commit so the tagged tree includes the MLflow export.
-- CI green on main ([run 35010584925](https://github.com/Abhinawap/mulegraph/actions/runs/35010584925)): 145 passed, 1 skipped, 83% coverage, smoke OK. #13 closed.
-- `report/exports/mvp_elliptic_mvp_runs.csv`: all 102 runs of the `elliptic_mvp` experiment (both parents, `341e0f93…` at `ec4501f` and the superseded `281caef1…` at `a64a16e`), per spec §2.5's tag convention.
-- PR #26 (ponytail policy) closed as superseded by the *Building (ponytail)* section in `CLAUDE.md`.
-
----
-
-## What's next
-
-In order. Each item blocks the ones below it. Items 0a–0d are the "this week" list from the [viability review](viability_review_2026-09.md) (15 Sep 2026).
-
-0a. ~~**Merge `feature/mvp-elliptic` to `main`**~~ — done 16 Sep 2026: merge commit `dd85dec`, CI green on main (#13 closed). Tag `mvp` is on the #29 merge commit, which adds the MLflow CSV export (`report/exports/`).
-0b. **Obtain and read Šafář et al. 2026** (FSI: Digital Investigation, paywalled) — the leakage claim decides whether Elliptic stays a benchmark dataset or becomes drift-only. Blocks the methods chapter's `base` vs `raw165` argument.
-0c. ~~**Add Maganti 2026 and Šafář 2026 to the related-work notes**~~ — done 16 Sep 2026 in `docs/methods_draft.md` §13; Šafář marked abstract-only. Elliptic is framed as replication + feature/model decomposition of Maganti, not as the headline.
-0d. ~~**Open #9 with the AMLworld floor:**~~ — done 15 Sep 2026. the AMLworld two-by-two under temporal + inductive is the v1b minimum, not a negotiable extra (comment posted on #9, 15 Sep).
-1. **Clear week-1 gates 3 and 5 on a bigger GPU** (see checklist below). IBM's PNA settings need at least about 13 GiB of GPU memory and SAGE more than 8 GB, so the timings need BlueBEAR or a capped cloud GPU with 16 GB or more (24 GB preferred). The Multi-GNN environment recipe, SAGE swap diff and probe scripts are recorded in *Verified method notes*. Then set AMLworld's `W` and the v1b grid arithmetic. Gates 2 and 4 are done.
-2. **Agree v1b scope with the supervisor, in writing, before v1a starts.** Floor per 0d; extras in priority order: the other two regimes, then PNA on temporal + inductive.
-3. ~~**Bootstrap the package**~~ — done 9 Sep 2026: pinned `pyproject.toml` + `uv.lock`, `types.py`, `config.py`, `util.py`, synthetic generator, model protocol, Typer CLI, CI.
-4. ~~**Elliptic++ loader**~~ — done 9 Sep 2026 (`d0fbcc3`); passes on the real files 10 Sep.
-5. ~~**Causal feature builder**~~ — done 9 Sep 2026 (`e6625d7`).
-6. ~~**Split builder**~~ — done 9 Sep 2026 (`d0fbcc3`).
-7. ~~**XGBoost then GraphSAGE**~~ — done 9 Sep 2026 (`0ccdfbf`, `dfd13ab`).
-8. ~~**Wire the pipeline and the smoke run**~~ — done 15 Sep 2026; proven on the synthetic graph, not yet on Elliptic.
-8b. ~~**Run `configs/elliptic_mvp.yaml` on real Elliptic++**~~ — done 15 Sep 2026 (`ec4501f`, #7); gate 2 cleared, W = 120 min on Elliptic.
-9. **Methods chapter (#8): first draft written 16 Sep 2026** (`docs/methods_draft.md`); next is supervisor review and the remaining `TODO`s. Spec §1.6 mitigates "Christmas writing slips" by drafting it at MVP, not at Christmas. Do not defer this. Start from *Verified method notes* below and lead the Elliptic results with the per-window (t38–42 / t43–49) numbers, not the mean.
-
----
+- [x] Elliptic++ benchmark: `{xgb, sage} × {base, base_gfp}` + `xgb.raw165`, random and temporal, five seeds, logged to MLflow (`ec4501f`, tag `mvp`)
+- [x] Per-timestep F1 / PR-AUC curves and figure; predictions persisted per run (`afe6ef5`)
+- [x] Drift monitor: PSI, KS, confidence shift on the validation reference; lead-time table and figure; `mulegraph drift` (`d322082`)
+- [x] AMLworld HI-Small loader as an edge task; per-edge GFP features; day-based temporal split; `xgb.base` and `xgb.base_gfp` rows (`a10c53c`)
+- [ ] GraphSAGE edge head on AMLworld (learned account embedding, `LinkNeighborLoader` with temporal sampling), run on a 16 GB GPU
+- [ ] README with the headline drift figure, both results tables, and a what-didn't-work section
+- [ ] Repository public; tag `v1.0`
 
 ## Verified method notes
 
-Facts that constrain the code, verified on fixtures and kept here instead of in docstrings. Cite them in the methods chapter.
+Facts that constrain the code, verified on fixtures and kept here instead of in docstrings. Cite them in the write-up.
 
 - **GFP scoring is batch-static** (`features/gfp.py`, `features/aggregate.py`). `transform` inserts the whole batch before scoring any edge, so row order within a timestep is irrelevant and folding vertex-side histograms (fan/degree in/out) onto nodes by `max` is exact, not an approximation (across batches it keeps the largest window a node was seen in). Edge-pattern histograms (scatter-gather, cycles) are summed onto both endpoints: multiplicity is the signal.
+- **GFP is causal only by usage, not by construction.** It is stateful, and `transform` itself inserts the batch into the in-memory graph before scoring it. Ingesting a whole table before transforming leaks the future backwards (verified on a toy fixture where a transaction at *t1* gained neighbour statistics generated by an edge at *t2*). The only correct drive pattern is `transform(batch_t)` alone, for *t* ascending; `partial_fit` followed by `transform` inserts each batch twice and doubles every count (verified: a vertex with 2 out-edges reports 4). Output is bit-identical across runs and thread counts.
 - **Edge ids must be globally unique.** snapml overwrites an edge whose id it has already seen, so per-batch ids would erase history; the builder passes the dataset's global edge index.
 - **`vs_*` columns are cumulative, not windowed.** snapml 1.17.2 ignores `vertex_stats_tw`, while pattern histograms respect their `_tw`. Still past-only (PR-F2) and invisible on Elliptic (no vertex recurs across timesteps), but it matters on AMLworld.
+- **`lc-cycle` cost is superlinear in density.** 4,000 edges over 400 nodes did not finish in 3 minutes; the same edges over 3,000 nodes took seconds. Elliptic's timesteps are sparse (all 49 in ~2 s); on AMLworld the cycle family is off by default.
 - **Output layout is probed, not trusted.** `probe_layout` checks the arithmetic layout against a real `transform` on a toy batch, so a snapml upgrade that reorders or resizes columns fails loudly.
-- **Causality guard** (`node_agg_v1`): a batch at *t* writes only into nodes with `node_time >= t`. Vacuous on Elliptic, load-bearing on cross-time graphs. Nodes with no causal evidence keep a zero row.
+- **Causality guard** (`node_agg_v1`): a batch at *t* writes only into nodes with `node_time >= t`. Vacuous on Elliptic, load-bearing on cross-time graphs. Nodes with no causal evidence keep a zero row. On an edge task the per-edge GFP rows are used directly and the `GfpDriver` monotone-time check is the guard.
 - **Elliptic++ extras are dropped** (`data/elliptic.py`, PR-M7). The 17 columns the ++ release adds, including graph-derived `in_txs_degree`/`out_txs_degree`, would put neighbourhood structure into `base`; they are recorded in `meta.dropped_columns`. pyarrow reads only the 167 kept columns, as float32, so the 695 MB CSV fits a 7 GB host.
-- **`edge_time` is the source node's timestep.** That is causal only because the loader refuses any cross-timestep edge.
-- **Elliptic temporal test is two regimes in one** (verified 15 Sep 2026 by refitting the deterministic XGBoost configs at `a64a16e`). Test F1 is 0.83–0.89 on t38–42 and 0.02–0.03 on t43–49, after the dark-market shutdown; 169 of the 828 test illicit nodes fall after t43. Validation (t35–37) precedes the shutdown, so val F1 ≈ 0.93 does not predict test. This is also why P@R0.8 is ≈ 0.2 for every model: reaching 80% recall means reaching into the post-shutdown cases no model detects. The per-timestep curves (#12) are what make the headline mean readable.
+- **`edge_time` is the source node's timestep on Elliptic.** That is causal only because the loader refuses any cross-timestep edge.
+- **Elliptic temporal test is two regimes in one.** Test F1 is 0.83–0.89 on t38–42 and 0.02–0.03 on t43–49, after the dark-market shutdown; 169 of the 828 test illicit nodes fall after t43. Validation (t35–37) precedes the shutdown, so val F1 ≈ 0.93 does not predict test. This is also why P@R0.8 is ≈ 0.2 for every model: reaching 80% recall means reaching into the post-shutdown cases no model detects. The per-timestep curves are what make the headline mean readable.
 - **Threshold ties go to the higher threshold** (`eval/threshold.py`): same F1, fewer alerts.
 - **Two intervals, never pooled** (`eval/intervals.py`, PR-E3). The across-seed t-interval (n = 5; a normal interval would be ~⅓ too narrow) is the only basis for significance. A bootstrap over test ids is narrow regardless of training instability and is used only for per-timestep bands.
-- **`p_at_r*` are curve metrics.** They take the highest-threshold PR point that reaches the target recall (the cleanest alert queue that still catches that share) and never set the deployed threshold.
-- **The results table is scoped to one parent run** (`pipeline.py`, `report/tables.py`, PR-E3). The reporter selects child runs by experiment, so before this was scoped, re-running a config into the same experiment — after a crash, a partial run, any code change — counted the earlier children as extra seeds. Five seeds run twice reported `n_seeds = 10`: the half-width is `t(n-1)·sd/√n`, so that is t(9)/√10 in place of t(4)/√5, an interval about 40% of its honest width from no new information. The pipeline passes the parent run id it just created. `n_seeds` in a table must be the n the protocol ran.
-- **A dirty working tree is stamped, not just warned about** (`pipeline.py`, NFR-1). Runs from an uncommitted tree are tagged `<sha>-dirty`, which flows into the CSV `commit` column. A warning on stderr vanishes; the artifact has to carry it, or a reader in 2027 sees a clean commit stamp on numbers that never came from it.
-- **Split seed ≠ model seed** (`splits/builder.py`). Every model seed refits on one fixed partition, so the interval measures retraining variance, not partition variance. The split cache doubles as a determinism check (PR-D4). The Elliptic temporal split hash is `f576c23d95a59084`; the `b065845303bd6a35` once quoted in #4 is the same partition hashed without `raw_sha256` (re-verified 15 Sep 2026 against `d0fbcc3`, arrays bit-identical).
-- **SAGE inputs are z-scored with train-row statistics** (`models/sage.py`, PR-E1). Mean and std come from `split.train` rows only and are applied to every node; a column constant on train (17% of GFP columns on Elliptic's temporal train set) keeps std 1 and maps to zero. The first Elliptic run (`a64a16e`) fed raw values: base columns up to |x| = 265 with column std 0.01–2.55, GFP counts up to 472 with 86% zeros. Trees are scale-invariant; a GNN is not, and leaving it unscaled handicaps the GNN — a bias toward the expected finding. Decided on principle before its effect was measured. XGBoost is unchanged.
-- **SAGE** (`models/sage.py`) trains on the symmetrised graph, and inference is always full-batch (exact at 203k nodes). CUDA scatter reductions are not bitwise deterministic; the seed interval covers that variation. Only `layers`/`hidden` come from the spec — the rest of `sage_default_2x64` is our choice, logged verbatim.
-- **XGBoost trial 0** is library defaults plus `n_estimators=1000` as an early-stopping ceiling. `scale_pos_weight` comes from the train split only. xgboost ≥ 2 takes `early_stopping_rounds` on the constructor, which is why trial 0 carries it.
-- **Trial 0 is merged in each model's constructor** (`XGBModel`, `SAGEModel`); config `params` override it. With no search in the MVP, runs must log `trials_completed = 0` and `trial0_source` — an honest zero, not a nominal 1 (D2).
-- **`val_f1` from `choose_threshold`** is a selection diagnostic, never a headline metric; it is logged so a val/test disagreement is visible.
-- **SAGE inference is full-batch** so sampling noise stays out of both the reported metric and the early-stopping signal.
-- **AMLworld HI-Small is ten days of traffic plus a laundering tail** (gate 4, 16 Sep 2026, recounted independently from `HI-Small_Trans.csv`). There are 5,078,345 transactions (5,177 laundering, 0.10%) and 515,088 accounts, with timestamps from 2022-09-01 00:00 to 2022-09-18 16:18, a nominal 17.68 days. After 10 Sep only 1,108 transactions remain, 655 (59%) of them laundering. The first three days hold 1,121 laundering edges. D4 expected about ten days; the populated span matches, but a test period reaching the tail sees a much higher positive rate. IBM's day 0–5 / 6–7 / 8–17 split has laundering rates of 0.08% / 0.11% / 0.19%. Which D4 branch applies goes to the supervisor (#9, q8).
-- **IBM's Multi-GNN reference settings do not fit an 8 GB GPU** (gate 3 probe, 16 Sep 2026, Multi-GNN `252b025`, batch 8192, 100 × 100 neighbours, `--emlps --reverse_mp --ego --ports`). PNA ran out of memory in the first backward pass with 11.88 GiB allocated, so it needs at least about 13 GiB. SAGE ran only by spilling into WSL shared memory and took about 48 min for one training pass, which measures the spill, not the model. Batch and neighbour counts were deliberately not reduced (they are IBM's published configuration). `env.yml` does not solve (`cudatoolkit=11.8` conflict); a working environment is Python 3.9 + pip torch 2.4.1+cu118 + PyG 2.6.1 wheels. IBM's preprocessing runs in 53 s with a 1.2 GiB peak, but its port-numbering loop adds about 5 min to every load. The SAGE swap (`SAGEe`, a copy of `GINe` with `SAGEConv`) and the probe scripts are uncommitted scratch work; they are rebuilt from this note when a bigger GPU is available.
-
----
-
-## Week-1 gates
-
-These set `W` and the grid arithmetic. Nothing downstream is reliable until they are done.
-
-- [x] `snapml` GraphFeaturePreprocessor installs — **GFP is the backend; `igraph` fallback not needed** (9 Sep 2026)
-- [x] One GraphSAGE fit on full Elliptic timed **with our loader** — `sage.base_gfp` temporal s0 23.1 s, slowest fit 44.3 s, so W = 120 min on Elliptic (15 Sep 2026, `ec4501f`)
-- [ ] One GraphSAGE fit and one PNA fit on AMLworld HI-Small timed **using IBM's Multi-GNN repo and its own preprocessing** (not our loader) — **blocked 16 Sep 2026**: IBM's settings need more than the laptop's 8 GB GPU (PNA OOM at 11.88 GiB allocated); needs a 16–24 GB GPU
-- [x] AMLworld HI-Small real time span read off — 2022-09-01 to 2022-09-18, 17.68 days nominal, ordinary traffic ends 10 Sep (16 Sep 2026)
-- [ ] `W` set to `max(120 min, 2 × slowest measured single fit)`; v1a/v1b grid arithmetic recomputed and the v1a/v1b dates confirmed
-
----
-
-## MVP definition of done
-
-All items verified on the real Elliptic++ run at `ec4501f` (15 Sep 2026, #7).
-
-- [x] Elliptic++ transaction graph loads from one command and caches, with `meta.cross_time_edges = False` (`ec4501f`)
-- [x] Causal graph features (fan-in/out, degree, scatter-gather, short cycles) via GFP (`e6625d7`)
-- [x] Causality unit test passes on a synthetic multi-timestep fixture (`e6625d7`)
-- [x] Leak-checked temporal split: train ≤ t34, val t35–37, test t38–49; id-overlap assertion; `split_hash` logged (`f576c23d95a59084`, `ec4501f`)
-- [x] Threshold chosen on the validation PR curve, never on test (`pipeline.py`, spy test in `tests/test_pipeline.py`)
-- [x] `mulegraph run --config configs/elliptic_mvp.yaml` produces the results table for `{xgb, sage} × {local, local+gfp}` + `xgb.raw165`, on random and temporal splits (`ec4501f`)
-- [x] Metrics: fraud F1, PR-AUC, P@R0.5, P@R0.8 (`ec4501f`)
-- [x] Every run logs params, metrics, seed, feature version, git commit to MLflow (`ec4501f`, parent `341e0f93709f487187f8ca276ff60d6a`)
-
----
-
-## Open blockers
-
-Numbered per spec §2.6. These two gate work:
-
-- **Compute access.** Is BlueBEAR (or equivalent GPU) available to final-year project students? A local RTX 4060 Laptop GPU is confirmed present (9 Sep 2026), which covers Elliptic. **It now blocks week-1 gates 3 and 5** (16 Sep 2026): IBM's AMLworld reference settings need more than 8 GB of GPU memory. It also remains open for the full v1b grid. Fallback is the personal GPU plus a capped cloud budget (target under £50).
-- **v1b scope.** Must be agreed in writing *before v1a starts*. Minimum: AMLworld two-by-two under temporal + inductive only. Negotiable extras in priority order: the other two regimes, then PNA on temporal + inductive.
-
-Also open with the supervisor: dissertation submission date and whether an autumn inspection exists; per-typology vs aggregate AMLworld reporting; whether to include ROC-AUC at all; whether the Multi-GNN node-task adaptation for Elliptic is worth the time; which typologies to hold out for injected drift events and how many events test H1; whether the 3-day/1-day/rest drift split leaves enough laundering edges in training.
-
----
-
-## Active risks
-
-Full table in spec §1.6. Currently live:
-
-| Risk | Fallback if it fires |
-|---|---|
-| Elliptic grid does not fit after week-1 timing | Lower `W` (keeping it equal for all models), then GNN seeds 5 → 3 |
-| AMLworld grid does not fit | In order: drop the random regime → GNN seeds to 3 → PNA trial 0 only → PNA to Later |
-| Multi-GNN hard to adapt | Time-box two weeks, then GraphSAGE only |
-| Scope creep into v2 before v1 is done | v2 cannot start before the benchmark freeze |
-| Christmas writing slips | Methods chapter drafted at MVP — item 9 in *What's next* |
-
----
-
-## Update rule
-
-Revise this file at every milestone boundary and whenever a gate, blocker, or risk changes state. Run `/issues-sync` first: it reports where this file and the GitHub issues disagree. Move completed work into *What's been accomplished* with its date, and record the same event in [changelog.md](changelog.md). Keep this file about **now and next** — history belongs in the changelog.
+- **`p_at_r*` are curve metrics.** They take the highest-threshold PR point that reaches the target recall and never set the deployed threshold.
+- **The results table is scoped to one parent run** (`pipeline.py`, `report/tables.py`, PR-E3). Before this was scoped, re-running a config into the same experiment counted the earlier children as extra seeds: five seeds run twice reported `n_seeds = 10`, an interval about 40% of its honest width from no new information.
+- **A dirty working tree is stamped, not just warned about** (`pipeline.py`, NFR-1). Runs from an uncommitted tree are tagged `<sha>-dirty`, which flows into the CSV `commit` column.
+- **Split seed ≠ model seed** (`splits/builder.py`). Every model seed refits on one fixed partition, so the interval measures retraining variance, not partition variance. The split cache doubles as a determinism check (PR-D4). The Elliptic temporal split hash is `f576c23d95a59084`.
+- **SAGE inputs are z-scored with train-row statistics** (`models/sage.py`, PR-E1). Mean and std come from `split.train` rows only; a column constant on train (17% of GFP columns on Elliptic's temporal train set) keeps std 1 and maps to zero. The first Elliptic run (`a64a16e`) fed raw values (base columns up to |x| = 265, GFP counts up to 472 with 86% zeros); trees are scale-invariant, a GNN is not, and leaving it unscaled handicaps the GNN toward the expected finding. Fixed before its effect was measured. XGBoost is unchanged.
+- **SAGE** (`models/sage.py`) trains on the symmetrised graph with neighbour sampling; inference is always full-batch (exact at 203k nodes), so sampling noise stays out of both the reported metric and the early-stopping signal. CUDA scatter reductions are not bitwise deterministic; the seed interval covers that variation.
+- **XGBoost trial 0** is library defaults plus `n_estimators=1000` as an early-stopping ceiling; `scale_pos_weight` comes from the train split only. With library defaults the seed has nothing to randomise, so all five XGBoost seeds are identical fits and XGBoost-vs-XGBoost gaps are degenerate.
+- **AMLworld HI-Small is ten days of traffic plus a laundering tail** (recounted from `HI-Small_Trans.csv`). 5,078,345 transactions (5,177 laundering, 0.10%), 515,088 accounts, 2022-09-01 00:00 to 2022-09-18 16:18. After 10 Sep only 1,108 transactions remain, 655 (59%) of them laundering: the generator completes its patterns after background activity stops. IBM's day 0–5 / 6–7 / 8–17 split has laundering rates 0.08% / 0.11% / 0.19%, so a test period reaching the tail sees a higher positive rate than training. The raw header names both account columns `Account`; the loader reads by position.
+- **IBM's Multi-GNN reference settings do not fit an 8 GB GPU** (Multi-GNN `252b025`, batch 8192, 100 × 100 neighbours, `--emlps --reverse_mp --ego --ports`). PNA ran out of memory in the first backward pass with 11.88 GiB allocated, so it needs at least about 13 GiB. A `SAGEConv` swap into its GIN class ran only by spilling into WSL shared memory (~48 min per training pass, measuring the spill, not the model). A working environment is Python 3.9 + torch 2.4.1+cu118 + PyG 2.6.1 wheels; IBM's preprocessing runs in 53 s, and its port-numbering loop adds about 5 min per load. The reference row was dropped rather than run at reduced settings.
