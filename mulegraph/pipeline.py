@@ -100,7 +100,13 @@ def _fit_one(
     import mlflow
 
     seed_all(seed)
-    model = get_model(model_cfg.name, model_cfg.params, device=device, sampler=model_cfg.sampler)
+    model = get_model(
+        model_cfg.name,
+        model_cfg.params,
+        device=device,
+        sampler=model_cfg.sampler,
+        task=data.task,
+    )
     info = model.fit(data, feats, split, seed)
 
     # PR-E4: the threshold comes from validation scores; test is scored with it, never searched.
