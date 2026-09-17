@@ -35,10 +35,10 @@ class XGBModel:
         """Fit on ``split.train``, early-stopping on validation PR-AUC."""
         check_train_labelled(data, split)
         x = feats.values
-        if x.shape[0] != data.num_nodes:
+        if x.shape[0] != data.num_units:
             raise ValueError(
-                f"feature matrix has {x.shape[0]} rows but the graph has {data.num_nodes} nodes; "
-                "FeatureMatrix rows are in node order"
+                f"feature matrix has {x.shape[0]} rows but the graph has {data.num_units} "
+                f"{data.task}s; FeatureMatrix rows are in unit order"
             )
         y = data.y
         y_train = y[split.train]

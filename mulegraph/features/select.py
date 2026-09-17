@@ -44,13 +44,13 @@ def select_features(data: GraphDataset, gfp: FeatureMatrix | None, selection: st
 
     if selection in ("base", "base_gfp"):
         start, stop = _local_block(data)
-        base_values = np.ascontiguousarray(data.x[:, start:stop], dtype=np.float32)
+        base_values = np.ascontiguousarray(data.unit_features[:, start:stop], dtype=np.float32)
         base_columns = list(names[start:stop])
         if selection == "base":
             return FeatureMatrix(
                 values=base_values,
                 columns=base_columns,
-                time=data.node_time,
+                time=data.unit_time,
                 feature_version="none",
                 name="base",
                 blocks={LOCAL_BLOCK: (0, base_values.shape[1])},
@@ -60,15 +60,15 @@ def select_features(data: GraphDataset, gfp: FeatureMatrix | None, selection: st
                 "features: base_gfp needs the causal graph features, but none were built; "
                 "call build_features() first (the pipeline does this once per dataset+config)"
             )
-        if gfp.values.shape[0] != data.num_nodes:
+        if gfp.values.shape[0] != data.num_units:
             raise ValueError(
-                f"graph features have {gfp.values.shape[0]} rows for {data.num_nodes} nodes"
+                f"graph features have {gfp.values.shape[0]} rows for {data.num_units} {data.task}s"
             )
         width = base_values.shape[1]
         return FeatureMatrix(
             values=np.hstack([base_values, gfp.values]).astype(np.float32),
             columns=base_columns + list(gfp.columns),
-            time=data.node_time,
+            time=data.unit_time,
             feature_version=gfp.feature_version,
             name="base_gfp",
             blocks={

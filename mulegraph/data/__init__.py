@@ -33,9 +33,16 @@ def _load_synthetic(cfg: DatasetConfig, raw_dir: Path) -> GraphDataset:
     return make_synthetic_elliptic(**params)
 
 
+def _load_amlworld(cfg: DatasetConfig, raw_dir: Path) -> GraphDataset:
+    from mulegraph.data.amlworld import load_amlworld_raw
+
+    return load_amlworld_raw(raw_dir, cfg.version, max_days=cfg.max_days)
+
+
 LOADERS: dict[str, Callable[[DatasetConfig, Path], GraphDataset]] = {
     "elliptic_pp": _load_elliptic,
     "synthetic_elliptic": _load_synthetic,
+    "amlworld": _load_amlworld,
 }
 
 
@@ -67,7 +74,11 @@ def load_dataset(
     if cfg.name not in LOADERS:
         raise ValueError(f"Unknown dataset {cfg.name!r}; known: {sorted(LOADERS)}")
 
-    cache_path = data_dir / "cache" / cfg.name / cfg.version / CACHE_FILENAME
+    # A truncated AMLworld load (max_days) must not be served as the full graph (NFR-1).
+    from mulegraph.data.amlworld import cache_version
+
+    version = cache_version(cfg.version, cfg.max_days)
+    cache_path = data_dir / "cache" / cfg.name / version / CACHE_FILENAME
     if use_cache and not force and cache_path.is_file():
         log.info("loading cached graph from %s", cache_path)
         return _load_cache(cache_path)
@@ -80,7 +91,7 @@ def load_dataset(
         data.meta.version,
         data.num_nodes,
         data.num_edges,
-        data.x.shape[1],
+        data.unit_features.shape[1],
         data.meta.num_timesteps,
         data.meta.label_counts,
     )
