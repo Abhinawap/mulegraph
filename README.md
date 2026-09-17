@@ -186,6 +186,21 @@ notebook cells that run the whole grid on a Kaggle P100. Set `dataset.max_days: 
 develop on a slice (cached separately). Every number above is tagged in MLflow with the git commit,
 dataset version, feature-version hash, split hash and seed; the exports are in `report/exports/`.
 
+## How this was built
+
+With Claude Code as the pair programmer, and I would rather say so than have you find `CLAUDE.md`
+and the `Co-Authored-By` trailers yourself. The split of labour: I set the question, chose the
+datasets, and wrote the rules the code must obey (threshold on validation only, features never see
+the future, `base` never contains neighbour aggregates, detectors never see labels, no accuracy).
+Claude drafted most of the code and prose against a written design and step-by-step plans I
+approved, and the checks in `tests/` are what I trust rather than either of us. The judgement calls
+in this repo were mine: dropping the PNA replication when it did not fit the GPU instead of
+running it at reduced settings, making the drift monitor the headline rather than the benchmark,
+reading the first "everything is flagged" drift run as a threshold problem, and cutting the
+dissertation scaffolding when the project became a portfolio piece. `CLAUDE.md` and `.claude/` are
+left in because they are the actual engineering process: a hook that refuses commits to `main`, an
+agent that audits diffs against the integrity rules, and a status file the session reads at start.
+
 ## Data and claims
 
 Both datasets are public and either pseudonymous (Bitcoin transactions) or synthetic (an agent-based
