@@ -8,6 +8,13 @@ labels**?
 Two public datasets, one leakage-free protocol, and a label-free drift monitor that is tested
 against a real model collapse.
 
+I picked this because the fraud-GNN papers I read all evaluated on random splits, which quietly let
+the model see the future, and because the practical question a financial-crime team actually has is
+not "is a GNN better" but "is it worth the cost, and how will I know when either model has stopped
+working, given that labels arrive weeks late". Both datasets here are public and imperfect
+(Bitcoin transactions with opaque features; a bank simulator), which is the honest position of
+anyone outside a bank.
+
 ![Drift monitor on the Elliptic t43 collapse](report/figures/elliptic_drift_drift.png)
 
 *Test F1 per timestep on Elliptic++ (black), the level below which the model counts as broken
@@ -17,22 +24,23 @@ the collapse; the detector that watches the model's own scores never does.*
 
 ## What I found
 
-**1. On Elliptic, the graph features did not help, and the graph model did worse.** Under the
-temporal split (train ≤ t34, validate t35–37, test t38–49), XGBoost on the 93 local features gets
+**I expected the graph features to help on Elliptic. They did not, and the graph model did worse.**
+Under the temporal split (train ≤ t34, validate t35–37, test t38–49), XGBoost on the 93 local features gets
 illicit-class F1 0.72; adding causal graph features (fan-in/out, degree, scatter–gather, short cycles
 computed only from past edges) leaves it at 0.72; GraphSAGE gets 0.59 ± 0.03 with or without them.
 The published 165-feature block — which already contains one hop of neighbour aggregation — is the
 best single row at 0.78. That is the same shape as Weber et al. (2019) and Maganti (2026) found.
 
-**2. The temporal mean hides two regimes.** Every config scores F1 0.8–0.95 on t38–42 and ≈ 0 from
+**The temporal mean is two regimes averaged together.** Every config scores F1 0.8–0.95 on t38–42 and ≈ 0 from
 t43 on, when a dark-market shutdown changed what illicit activity looked like. The mean of 0.72 is
 "fine" averaged with "dead", which is why the per-timestep curve is the honest headline:
 
 ![Per-timestep F1](report/figures/elliptic_mvp_curves.png)
 
-**3. Feature drift is visible before performance drift — if you calibrate the detector.** With
-textbook thresholds (PSI ≥ 0.2, KS p < 0.01) every test timestep is flagged from t38, which tells
-you nothing. Calibrating each detector on its own noise floor — the largest score any validation
+**Feature drift is visible before performance drift, once the detector is calibrated.** My first
+run with textbook thresholds (PSI ≥ 0.2, KS p < 0.01) flagged every test timestep from t38, and for
+a while I read that as "the detectors don't work" rather than "the thresholds are wrong for 3,000
+rows a batch". Calibrating each detector on its own noise floor — the largest score any validation
 timestep gets against the other two — changes the picture:
 
 | model (features)   | detector           | first flag | F1 collapse | lead (timesteps) |
@@ -49,7 +57,7 @@ when the *relationship* between features and labels changed at t43. Watching the
 distribution alone would have missed that entirely. GraphSAGE had already fallen 20% below its
 validation F1 by t39, so for it "drift" and "failure" arrive together.
 
-**4. On AMLworld the graph features matter a lot.** On HI-Small (5.1M transactions, 0.10%
+**On AMLworld the graph features matter a lot.** On HI-Small (5.1M transactions, 0.10%
 laundering, IBM's day split), XGBoost on the six raw transaction fields gets F1 0.21 / PR-AUC 0.11;
 with the same causal graph features it gets **F1 0.54 / PR-AUC 0.52**. That is the same direction
 and roughly the same size as IBM's own GFP paper reports (0.63 minority-class F1 for GFP+XGB under
@@ -78,9 +86,13 @@ deterministic, so its interval is zero by construction, not by luck.
 | sage.base_gfp | 0.560 ± 0.023 | 0.577 ± 0.031 | 0.652 ± 0.062 | 0.186 ± 0.014 |
 | xgb.raw165 (published block) | 0.778 | 0.739 | 0.995 | 0.194 |
 
-P@R0.8 ≈ 0.2 for everything: reaching 80% recall means reaching into the post-t43 cases no model
-finds. On the random split every config scores 0.90–0.96 F1, which is the number you would report if
-you did not know about leakage.
+The two precision-at-recall columns are the operational reading. P@R0.5 ≈ 0.98 for XGBoost means
+that if the compliance team is willing to catch half the illicit transactions, almost every alert an
+analyst opens is real. P@R0.8 ≈ 0.2 for every model means that to catch 80% you accept four false
+alerts per true one, because the remaining cases are the post-t43 ones nothing detects. That is the
+tradeoff a bank actually sets a threshold on, and it is why the threshold here is chosen on
+validation and reported, never tuned on test. On the random split every config scores 0.90–0.96 F1,
+which is the number you would report if you did not know about leakage.
 
 **AMLworld HI-Small (5.1M transactions, 515k accounts, 0.10% laundering), IBM's day split 0–5 / 6–7 / 8–17**
 
@@ -134,6 +146,11 @@ configs/          one YAML per experiment
 tests/            169 tests on synthetic fixtures; the real-data tests are marked and skipped in CI
 docs/             design.md (decisions, contracts, requirement register), methods.md (write-up)
 ```
+
+The longer reads: [`docs/design.md`](docs/design.md) for the four design decisions and the
+component contracts, [`docs/methods.md`](docs/methods.md) for the method, the results in full and how
+they sit against Weber 2019, Altman 2023, Blanuša 2024 and Maganti 2026, and
+[`docs/changelog.md`](docs/changelog.md) for what changed and why.
 
 Rules the code enforces rather than documents: the decision threshold is chosen on the validation
 PR curve and a test spy asserts it never sees test rows; features at *t* use only edges at or before
