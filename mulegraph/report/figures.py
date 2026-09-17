@@ -66,10 +66,10 @@ def plot_drift(curves: pd.DataFrame, leads: pd.DataFrame, path: Path) -> Path:
         first_drop = lead["first_drop"].median()
         if not pd.isna(first_drop):
             ax.axvspan(first_drop, mean.index.max(), color="red", alpha=0.08, label="F1 dropped")
-        for detector, block in lead.groupby("detector", sort=False):
+        for i, (detector, block) in enumerate(lead.groupby("detector", sort=False)):
             flag = block["first_flag"].median()
             if not pd.isna(flag):
-                ax.axvline(flag, ls="--", alpha=0.8, label=f"{detector} first flag")
+                ax.axvline(flag, ls="--", alpha=0.8, color=f"C{i}", label=f"{detector} first flag")
         ax.set_title(f"{model}.{features}")
         ax.set_xlabel("timestep")
         ax.grid(alpha=0.3)
