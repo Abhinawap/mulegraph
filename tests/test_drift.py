@@ -66,6 +66,35 @@ def test_lead_time_is_first_drop_minus_first_flag() -> None:
     assert table["drop_level"].tolist() == pytest.approx([0.72, 0.72])
 
 
+def test_a_single_dip_is_not_a_drop_but_a_sustained_one_is() -> None:
+    curve = pd.DataFrame({"time": [9, 10, 11, 12, 13], "f1": [0.8, 0.5, 0.8, 0.3, 0.2]})
+    scores = pd.DataFrame(
+        {"detector": ["psi"], "batch_id": [9], "score": [0.5], "flagged": [True]}
+    ).assign(threshold=0.2)
+    assert lead_time(curve, scores, 0.9, 0.2, drop_run=2)["first_drop"].item() == 12
+    assert lead_time(curve, scores, 0.9, 0.2, drop_run=1)["first_drop"].item() == 10
+
+
+def test_calibrated_thresholds_are_the_reference_noise_floor() -> None:
+    """A reference batch scored against the rest is never above the floor; a shifted one is."""
+    rng = np.random.default_rng(1)
+    batch = np.repeat([1, 2, 3, 10, 11], 400)
+    values = rng.normal(size=(2000, 4))
+    values[batch == 11] += 3.0
+    proba = rng.uniform(size=2000)
+    proba[batch == 11] = rng.uniform(0.5, 1.0, size=400)
+
+    table = score_batches(values, proba, batch, [1, 2, 3], calibrate=True)
+    flagged = table.set_index(["detector", "batch_id"])["flagged"]
+    assert not flagged.loc[("psi", 10)] and not flagged.loc[("conf", 10)]
+    assert flagged.loc[("psi", 11)] and flagged.loc[("ks", 11)] and flagged.loc[("conf", 11)]
+    floor = table.groupby("detector")["threshold"].first()
+    assert floor["psi"] > 0 and floor["conf"] > 0 and floor["ks"] >= 0
+
+    with pytest.raises(ValueError, match="two populated reference batches"):
+        score_batches(values, proba, batch, [1], calibrate=True)
+
+
 @pytest.fixture
 def drift_config(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> DriftRunConfig:
     monkeypatch.setenv("MULEGRAPH_DATA_DIR", str(tmp_path / "data"))

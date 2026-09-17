@@ -4,9 +4,12 @@
 #
 # Reference = the validation timesteps (t35-37). Every timestep from t38 on is
 # scored by PSI / KS on the features and KS on the model's scores, with no
-# labels; the lead-time table compares each detector's first flag with the
-# first timestep where test F1 falls 20% below the validation mean (the ~t43
-# dark-market shutdown).
+# labels. Thresholds are calibrated on the reference itself: the largest
+# leave-one-out score among t35-37 is the noise floor, because at ~3k nodes per
+# timestep the textbook PSI 0.2 / KS p<0.01 flags every batch. The lead-time
+# table compares each detector's first flag with the first timestep where test
+# F1 stays 20% below the validation mean for two batches (~t43, the dark-market
+# shutdown).
 
 dataset:
   name: elliptic_pp
@@ -37,10 +40,10 @@ seeds: [0, 1, 2, 3, 4]
 drift:
   detectors: [psi, ks, conf]
   bins: 10
-  psi_flag: 0.2
   ks_alpha: 0.01
-  ks_frac: 0.2
+  calibrate: true
   f1_drop: 0.2
+  drop_run: 2
 
 mlflow:
   experiment: elliptic_drift

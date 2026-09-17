@@ -234,8 +234,12 @@ class DriftConfig(Strict):
     psi_flag: float = Field(0.2, gt=0.0)
     ks_alpha: float = Field(0.01, gt=0.0, lt=1.0)
     ks_frac: float = Field(0.2, gt=0.0, lt=1.0)
-    #: Relative F1 fall from the validation mean that counts as the model breaking.
+    conf_flag: float = Field(0.1, gt=0.0, lt=1.0)
+    #: Replace the fixed flags with each detector's leave-one-out maximum inside the reference.
+    calibrate: bool = False
+    #: Relative F1 fall from the validation mean, sustained for ``drop_run`` batches, = broken.
     f1_drop: float = Field(0.2, gt=0.0, lt=1.0)
+    drop_run: int = Field(2, ge=1)
 
 
 class DriftRunConfig(RunConfig):

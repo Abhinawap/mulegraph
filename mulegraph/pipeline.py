@@ -336,9 +336,11 @@ def run_drift(cfg: DriftRunConfig, config_path: Path) -> Path:
                     psi_flag=cfg.drift.psi_flag,
                     ks_alpha=cfg.drift.ks_alpha,
                     ks_frac_flag=cfg.drift.ks_frac,
+                    conf_flag=cfg.drift.conf_flag,
+                    calibrate=cfg.drift.calibrate,
                 )
                 ref_f1 = float(per_timestep(fitted.val, fitted.threshold)["f1"].mean())
-                lead = lead_time(fitted.curve, table, ref_f1, cfg.drift.f1_drop)
+                lead = lead_time(fitted.curve, table, ref_f1, cfg.drift.f1_drop, cfg.drift.drop_run)
                 tag = {"model": model_cfg.name, "features": model_cfg.features, "seed": seed}
                 scores.append(table.assign(**tag))
                 leads.append(lead.assign(ref_f1=ref_f1, **tag))
