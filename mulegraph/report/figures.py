@@ -6,6 +6,7 @@ from collections.abc import Callable, Sequence
 from pathlib import Path
 
 import matplotlib
+import numpy as np
 import pandas as pd
 
 matplotlib.use("Agg")
@@ -36,9 +37,7 @@ def plot_curves(
         for (model, features), cfg in block.groupby(["model", "features"], sort=True):
             stats = cfg.groupby("time")[metric].agg(lambda v: interval(v.dropna().tolist()))
             times = stats.index.to_numpy()
-            mean, low, high = (
-                pd.Series([s[i] for s in stats], dtype="float64").to_numpy() for i in range(3)
-            )
+            mean, low, high = np.array(stats.tolist(), dtype=np.float64).T
             ax.plot(times, mean, marker="o", ms=3, label=f"{model}.{features}")
             if not pd.isna(low).all():
                 ax.fill_between(times, low, high, alpha=0.15)

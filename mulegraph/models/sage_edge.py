@@ -254,18 +254,7 @@ class SAGEEdgeModel:
             seconds=timer.seconds,
             best_iteration=best_epoch,
             val_pr_auc=best_ap,
-            extra={
-                "sampler": self.sampler.kind,
-                "fanout": list(self.sampler.fanout),
-                "batch_size": self.sampler.batch_size,
-                "epochs_run": epoch,
-                "pos_weight": pos_weight,
-                "n_train_pos": n_pos,
-                "n_train_neg": n_neg,
-                "device": self.device,
-                "trial0_source": TRIAL0_SOURCE,
-                "params": dict(self.params),
-            },
+            extra={"trial0_source": TRIAL0_SOURCE, "params": dict(self.params)},
         )
 
     def _infer(
@@ -301,8 +290,7 @@ class SAGEEdgeModel:
         """P(illicit) for the edges ``idx`` as float32 in [0, 1]."""
         self._require_fitted()
         self._prepare(data, feats)
-        proba = self._infer(data, feats, np.asarray(idx, dtype=np.int64))
-        return np.clip(proba, 0.0, 1.0).astype(np.float32)
+        return self._infer(data, feats, np.asarray(idx, dtype=np.int64))
 
     def embed(self, data: GraphDataset, feats: FeatureMatrix, idx: np.ndarray) -> np.ndarray:
         """Head activations before the output layer, for the edges ``idx``."""

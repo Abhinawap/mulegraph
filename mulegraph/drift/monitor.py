@@ -10,7 +10,6 @@ import pandas as pd
 from mulegraph.drift.detectors import conf_shift, ks_frac, psi
 
 DETECTORS = ("psi", "ks", "conf")
-SCORE_COLUMNS = ["detector", "batch_id", "score", "flagged", "threshold"]
 
 
 def _scorers(
@@ -70,7 +69,7 @@ def score_batches(
         for name, score in scorers.items():
             s = score(values[ref], values[cur], proba[ref], proba[cur])
             rows.append((name, int(b), s, s > thresholds[name], thresholds[name]))
-    return pd.DataFrame(rows, columns=SCORE_COLUMNS)
+    return pd.DataFrame(rows, columns=["detector", "batch_id", "score", "flagged", "threshold"])
 
 
 def lead_time(
