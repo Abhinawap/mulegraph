@@ -213,7 +213,7 @@ def test_window_bounds_how_far_back_a_batch_can_see(features_cfg: FeaturesConfig
     Also records a snapml 1.17.2 quirk: the vertex-statistic block ignores
     ``vertex_stats_tw`` and accumulates over every batch inserted so far. That is
     still past-only, so PR-F2 holds, but ``vs_*`` columns are cumulative rather
-    than windowed and the dissertation says so.
+    than windowed and the write-up says so.
     """
     first = _batch([(1, 0, 1), (2, 0, 1)], first_id=0)
     second = _batch([(3, 0, 2), (4, 0, 2)], first_id=10)
