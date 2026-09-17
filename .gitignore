@@ -42,3 +42,4 @@ coverage.xml
 
 # uv
 .venv/
+.claude/worktrees/

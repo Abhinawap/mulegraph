@@ -3,21 +3,29 @@
 from __future__ import annotations
 
 import logging
+import math
 import os
 import shutil
 import tempfile
+from dataclasses import dataclass
 from pathlib import Path
+
+import numpy as np
+import pandas as pd
 
 from mulegraph.config import ModelConfig, RunConfig, load_config
 from mulegraph.data import load_dataset
+from mulegraph.eval.curves import CURVE_METRICS, per_timestep
 from mulegraph.eval.metrics import EXTRA_KEYS, compute_metrics
 from mulegraph.eval.threshold import choose_threshold
 from mulegraph.features.builder import build_features
 from mulegraph.features.select import select_features
 from mulegraph.models import get_model
+from mulegraph.models.base import BaseModel
+from mulegraph.report.figures import plot_curves
 from mulegraph.report.tables import write_results_table
 from mulegraph.splits.builder import build_split
-from mulegraph.types import FeatureMatrix, GraphDataset, Split
+from mulegraph.types import FeatureMatrix, GraphDataset, Predictions, Split
 from mulegraph.util import Paths, git_commit, git_dirty, resolve_device, seed_all
 
 log = logging.getLogger("mulegraph")
@@ -38,6 +46,45 @@ def _ensure_local_store(uri: str) -> None:
         Path(uri[len(prefix) :]).expanduser().parent.mkdir(parents=True, exist_ok=True)
 
 
+@dataclass(eq=False)
+class Fitted:
+    """One fitted (regime, model, seed) with its validation threshold and scored predictions."""
+
+    model: BaseModel
+    threshold: float
+    val: Predictions
+    test: Predictions
+    curve: pd.DataFrame  # per-timestep metrics on test (PR-E5)
+
+
+def _predict(
+    model: BaseModel, data: GraphDataset, feats: FeatureMatrix, idx: np.ndarray
+) -> Predictions:
+    return Predictions(
+        idx=idx,
+        proba=model.predict_proba(data, feats, idx),
+        y=data.y[idx],
+        time=data.batch_id[idx],
+    )
+
+
+def _log_predictions(val: Predictions, test: Predictions) -> None:
+    """Persist scored rows as an artifact so curves and drift are regenerable (NFR-1)."""
+    import mlflow
+
+    frame = pd.concat(
+        [
+            pd.DataFrame({"idx": p.idx, "proba": p.proba, "y": p.y, "time": p.time, "part": part})
+            for part, p in (("val", val), ("test", test))
+        ],
+        ignore_index=True,
+    )
+    with tempfile.TemporaryDirectory() as tmp:
+        path = Path(tmp) / "predictions.parquet"
+        frame.to_parquet(path, index=False)
+        mlflow.log_artifact(str(path))
+
+
 def _fit_one(
     cfg: RunConfig,
     data: GraphDataset,
@@ -47,7 +94,7 @@ def _fit_one(
     seed: int,
     device: str,
     commit: str,
-) -> None:
+) -> Fitted:
     """Fit one (regime, model, seed), threshold on validation, score test, log a child run."""
     import mlflow
 
@@ -56,17 +103,13 @@ def _fit_one(
     info = model.fit(data, feats, split, seed)
 
     # PR-E4: the threshold comes from validation scores; test is scored with it, never searched.
-    p_val = model.predict_proba(data, feats, split.val)
-    threshold, val_f1 = choose_threshold(data.y[split.val], p_val)
-    scored = compute_metrics(
-        data.y[split.test],
-        model.predict_proba(data, feats, split.test),
-        threshold,
-        cfg.eval.metrics,
-        prefix="test_",
-    )
+    val = _predict(model, data, feats, split.val)
+    threshold, val_f1 = choose_threshold(val.y, val.proba)
+    test = _predict(model, data, feats, split.test)
+    scored = compute_metrics(test.y, test.proba, threshold, cfg.eval.metrics, prefix="test_")
     # Counts and point precision/recall are diagnostics: the results table is metrics.test_* only.
     diagnostics = {f"diag_{key}": scored.pop(f"test_{key}") for key in EXTRA_KEYS}
+    curve = per_timestep(test, threshold)
 
     with mlflow.start_run(run_name=f"{split.regime}.{model_cfg.key}.s{seed}", nested=True):
         mlflow.set_tags(
@@ -106,6 +149,17 @@ def _fit_one(
                 **({} if info.best_iteration is None else {"best_iteration": info.best_iteration}),
             }
         )
+        for row in curve.itertuples(index=False):
+            mlflow.log_metrics(
+                {
+                    f"ts_{name}": getattr(row, name)
+                    for name in CURVE_METRICS
+                    if not math.isnan(getattr(row, name))
+                },
+                step=int(row.time),
+            )
+        _log_predictions(val, test)
+    return Fitted(model, threshold, val, test, curve)
 
 
 def run_benchmark(cfg: RunConfig, config_path: Path) -> Path:
@@ -156,6 +210,7 @@ def run_benchmark(cfg: RunConfig, config_path: Path) -> Path:
         )
 
     done = 0
+    curves: list[pd.DataFrame] = []
     with mlflow.start_run(run_name=f"{cfg.mlflow.experiment}.{commit}") as parent:
         mlflow.set_tags({"kind": "parent", "dataset": data.meta.dataset, "git_commit": commit})
         mlflow.log_params(
@@ -182,7 +237,7 @@ def run_benchmark(cfg: RunConfig, config_path: Path) -> Path:
                         model_cfg.key,
                         seed,
                     )
-                    _fit_one(
+                    fitted = _fit_one(
                         cfg,
                         data,
                         matrices[model_cfg.features],
@@ -192,6 +247,20 @@ def run_benchmark(cfg: RunConfig, config_path: Path) -> Path:
                         device,
                         commit,
                     )
+                    curves.append(
+                        fitted.curve.assign(
+                            regime=split.regime,
+                            model=model_cfg.name,
+                            features=model_cfg.features,
+                            seed=seed,
+                        )
+                    )
+
+    curve_table = pd.concat(curves, ignore_index=True)
+    tables_dir = paths.tables_dir()
+    tables_dir.mkdir(parents=True, exist_ok=True)
+    curve_table.to_csv(tables_dir / f"{cfg.mlflow.experiment}_curves.csv", index=False)
+    plot_curves(curve_table, paths.figures_dir() / f"{cfg.mlflow.experiment}_curves.png")
 
     # Scoped to this run's children: an earlier run of the same config in the same
     # experiment must not be counted as extra seeds (PR-E3).

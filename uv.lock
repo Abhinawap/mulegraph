@@ -854,6 +854,7 @@ name = "mulegraph"
 version = "0.1.0"
 source = { editable = "." }
 dependencies = [
+    { name = "matplotlib", marker = "sys_platform == 'linux'" },
     { name = "mlflow", marker = "sys_platform == 'linux'" },
     { name = "numpy", marker = "sys_platform == 'linux'" },
     { name = "pandas", marker = "sys_platform == 'linux'" },
@@ -879,6 +880,7 @@ dev = [
 
 [package.metadata]
 requires-dist = [
+    { name = "matplotlib", specifier = "==3.11.1" },
     { name = "mlflow", specifier = "==3.16.0" },
     { name = "numpy", specifier = "==2.4.6" },
     { name = "pandas", specifier = "==3.0.5" },

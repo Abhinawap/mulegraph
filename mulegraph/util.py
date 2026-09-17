@@ -41,6 +41,9 @@ class Paths:
     def tables_dir(self) -> Path:
         return self.report_dir / "tables"
 
+    def figures_dir(self) -> Path:
+        return self.report_dir / "figures"
+
 
 def canonical_json(obj: Any) -> str:
     """Stable JSON for hashing: sorted keys, no incidental whitespace."""
