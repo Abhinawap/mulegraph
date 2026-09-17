@@ -37,9 +37,11 @@ class SyntheticConfig(Strict):
 
 
 class DatasetConfig(Strict):
-    name: Literal["elliptic_pp", "synthetic_elliptic"]
+    name: Literal["elliptic_pp", "synthetic_elliptic", "amlworld"]
     version: str = "2023.1"
     synthetic: SyntheticConfig | None = None
+    #: AMLworld only: keep the first N days so the loader fits a small host; cached separately.
+    max_days: int | None = Field(None, ge=1)
 
     @model_validator(mode="after")
     def _synthetic_only_for_synthetic(self) -> DatasetConfig:
@@ -47,6 +49,8 @@ class DatasetConfig(Strict):
             raise ValueError("dataset.synthetic is only valid for name: synthetic_elliptic")
         if self.name == "synthetic_elliptic" and self.synthetic is None:
             object.__setattr__(self, "synthetic", SyntheticConfig())
+        if self.max_days is not None and self.name != "amlworld":
+            raise ValueError("dataset.max_days is only valid for name: amlworld")
         return self
 
 
