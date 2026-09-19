@@ -7,6 +7,7 @@ from typing import Any
 
 import numpy as np
 import pytest
+import torch
 import torch_geometric.loader as pyg_loader
 
 from mulegraph.config import SamplerConfig
@@ -30,12 +31,17 @@ def make_feats(data: GraphDataset) -> FeatureMatrix:
     )
 
 
-@pytest.fixture
-def fitted(tmp_path: Path) -> tuple[SAGEEdgeModel, GraphDataset, FeatureMatrix, Split]:
+@pytest.fixture(params=["cpu", "cuda"])
+def fitted(
+    request: pytest.FixtureRequest, tmp_path: Path
+) -> tuple[SAGEEdgeModel, GraphDataset, FeatureMatrix, Split]:
+    # CPU hides device bugs: batch.to("cpu") is a no-op (the Kaggle P100 run found one).
+    if request.param == "cuda" and not torch.cuda.is_available():
+        pytest.skip("no CUDA device")
     data = make_edge_ds()
     feats = make_feats(data)
     split = build_split(data, TEMPORAL, tmp_path)
-    model = get_model("sage", PARAMS, device="cpu", sampler=SAMPLER, task="edge")
+    model = get_model("sage", PARAMS, device=request.param, sampler=SAMPLER, task="edge")
     assert isinstance(model, SAGEEdgeModel)
     model.fit(data, feats, split, seed=0)
     return model, data, feats, split

@@ -18,15 +18,18 @@ uv sync --frozen 2>&1 | tail -2
 ```
 
 Cell 2 — point the loader at the mounted CSV and run (XGB rows in minutes, SAGE rows ~30–40 min
-each with `epochs: 10`; 3 seeds × 4 configs):
+each with `epochs: 10`; 3 seeds × 4 configs). `MPLBACKEND=Agg` overrides Kaggle's inline backend,
+which the uv environment does not have:
 
 ```bash
 %%bash
 cd /kaggle/working/mulegraph
+src=$(find /kaggle/input -name HI-Small_Trans.csv | head -1)   # mount path varies by notebook
+[ -n "$src" ] || { echo "HI-Small_Trans.csv not under /kaggle/input: add the dataset in Input"; exit 1; }
+echo "using $src"
 mkdir -p data/raw/amlworld/hi_small
-ln -sf /kaggle/input/ibm-transactions-for-anti-money-laundering-aml/HI-Small_Trans.csv \
-       data/raw/amlworld/hi_small/HI-Small_Trans.csv
-uv run mulegraph run --config configs/amlworld_hi_small.yaml 2>&1 | grep -v "gfp t="
+ln -sf "$src" data/raw/amlworld/hi_small/HI-Small_Trans.csv
+MPLBACKEND=Agg uv run mulegraph run --config configs/amlworld_hi_small.yaml 2>&1 | grep --line-buffered -v "gfp t="
 ```
 
 Cell 3 — bundle the outputs for download (Output tab → `amlworld_run.zip`):
