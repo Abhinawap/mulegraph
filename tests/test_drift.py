@@ -154,6 +154,29 @@ def test_drift_refuses_anything_but_one_temporal_regime(drift_config: DriftRunCo
         DriftRunConfig.model_validate(raw)
 
 
+def test_event_must_leave_a_test_batch_on_each_side(drift_config: DriftRunConfig) -> None:
+    raw = drift_config.model_dump()
+    for event in (9, 13):
+        raw["drift"]["event"] = event
+        with pytest.raises(ValueError, match="inside the test window"):
+            DriftRunConfig.model_validate(raw)
+
+
+def test_run_drift_with_an_event_writes_before_and_after_rows(
+    drift_config: DriftRunConfig, tmp_path: Path
+) -> None:
+    raw = drift_config.model_dump()
+    raw["drift"]["event"] = 11
+    pipeline.run_drift(DriftRunConfig.model_validate(raw), pipeline.SMOKE_CONFIG)
+
+    table = pd.read_csv(tmp_path / "report" / "tables" / "drift_test_event.csv")
+    assert len(table) == 2 * 2  # windows x seeds
+    assert set(table["window"]) == {"before", "after"}
+    assert table["probe_roc_auc"].between(0, 1).all()
+    # The probe depends on the window and features only, not the seed of the fitted model.
+    assert table.groupby("window")["probe_roc_auc"].nunique().eq(1).all()
+
+
 def test_run_drift_writes_scores_and_lead_time(
     drift_config: DriftRunConfig, tmp_path: Path
 ) -> None:
@@ -170,3 +193,4 @@ def test_run_drift_writes_scores_and_lead_time(
     assert {r["batch_id"] for r in scores} == {"9", "10", "11", "12"}
     assert len(scores) == 3 * 4 * 2
     assert (tmp_path / "report" / "figures" / "drift_test_drift.png").stat().st_size > 0
+    assert not (tmp_path / "report" / "tables" / "drift_test_event.csv").exists()

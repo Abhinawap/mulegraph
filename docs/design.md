@@ -111,7 +111,8 @@ Every component depends only on the shared types in `mulegraph/types.py` (`Graph
 2. Each model × seed is fitted exactly as in the benchmark. The model then scores **every unit** whose `batch_id` falls in the validation or test window, labelled or not.
 3. Detectors compare each post-reference batch to the validation batches: PSI per feature column (score = max; flag > 0.2), two-sample KS per column (score = fraction with p < 0.01; flag > 0.2), and the KS statistic on the model's own scores (flag > 0.1). With `calibrate`, each fixed flag is replaced by the detector's largest leave-one-out score inside the reference window. They receive feature values and scores only.
 4. Lead time = (first test batch starting a `drop_run`-long stretch where F1 is more than 20% below the validation mean) − (first batch starting a `drop_run`-long run of flags), per detector. The drop and the flag need the same persistence, so a one-batch flag is not a warning. Labels enter only here, in the evaluation of the detector. The validation mean is F1 at the threshold chosen on that same window, so it is optimistic and the drop level sits correspondingly high; this can make an F1 drop register earlier than it would against an out-of-sample reference.
-5. Outputs: `report/tables/<experiment>_scores.csv`, `<experiment>_lead_time.csv`, `report/figures/<experiment>_drift.png`, all logged as artifacts.
+5. With `drift.event` set, the labelled test units are split at that batch. For each side the run records prevalence, the fitted model's ROC-AUC, recall at the validation threshold and median illicit score, plus a probe: 5-fold stratified CV ROC-AUC of XGBoost library defaults refit inside that window alone. A probe near 1 where transfer fails means the event changed what illicit looks like rather than making it unlearnable. The probe's folds are random within the window, so it measures separability, never deployment performance.
+6. Outputs: `report/tables/<experiment>_scores.csv`, `<experiment>_lead_time.csv`, `<experiment>_event.csv` (with `drift.event`), `report/figures/<experiment>_drift.png`, all logged as artifacts.
 
 ### 3.5 Storage and schemas
 
@@ -210,6 +211,7 @@ Stable ids cited by code, tests and docstrings.
 - **PR-R2.** Detectors run on batches with no access to labels.
 - **PR-R3.** Output per batch: drift score, threshold flag, and batch id.
 - **PR-R4.** Evaluation: lead time between the first drift flag and the first measured F1 drop beyond a set tolerance, on Elliptic's natural event, reported per detector.
+- **PR-R5.** Diagnosis of a known event: per side of the event batch, the fitted model's transfer (ROC-AUC, recall, median illicit score) beside a within-window refit probe. Labels are used; this evaluates the event, it is not a detector.
 
 **Reporting**
 - **PR-O1.** Every run logs parameters, metrics, feature version, dataset version, git commit, and seed to MLflow.

@@ -223,6 +223,8 @@ class DriftConfig(Strict):
     #: a detector warns only after ``drop_run`` consecutive flags.
     f1_drop: float = Field(0.2, gt=0.0, lt=1.0)
     drop_run: int = Field(2, ge=1)
+    #: First batch of a known external event; set, the run writes a before/after table (PR-R5).
+    event: int | None = None
 
 
 class DriftRunConfig(RunConfig):
@@ -235,6 +237,13 @@ class DriftRunConfig(RunConfig):
             raise ValueError(
                 "drift needs exactly one regime and it must be temporal: the reference is the "
                 "validation window and every scored batch must come after it in time (PR-R2)"
+            )
+        test = regimes[0].test
+        event = self.drift.event
+        if event is not None and test is not None and not test[0] < event <= test[1]:
+            raise ValueError(
+                f"drift.event {event} must fall inside the test window {test} after its first "
+                "batch, so the test window has a batch on each side of it (PR-R5)"
             )
         return self
 

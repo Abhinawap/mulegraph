@@ -17,6 +17,7 @@ from mulegraph.config import DriftRunConfig, ModelConfig, RunConfig, load_config
 from mulegraph.data import load_dataset
 from mulegraph.drift.monitor import lead_time, score_batches
 from mulegraph.eval.curves import CURVE_METRICS, per_timestep
+from mulegraph.eval.event import event_windows, probe_auc
 from mulegraph.eval.metrics import EXTRA_KEYS, compute_metrics
 from mulegraph.eval.threshold import choose_threshold
 from mulegraph.features.builder import build_features
@@ -315,7 +316,19 @@ def run_drift(cfg: DriftRunConfig, config_path: Path) -> Path:
         ref_batches[0],
         ref_batches[-1],
     )
-    scores, leads, curves = [], [], []
+    event = cfg.drift.event
+    probes: dict[tuple[str, str], float] = {}
+    if event is not None:
+        # Labelled test units only; the probe is a separability check, never a detector (PR-R5).
+        before = data.batch_id[split.test] < event
+        for key in matrices:
+            for window, mask in (("before", before), ("after", ~before)):
+                idx = split.test[mask]
+                probes[key, window] = probe_auc(
+                    matrices[key].values[idx], data.y[idx], cfg.seeds[0]
+                )
+        log.info("event at batch %d: probe ROC-AUC %s", event, probes)
+    scores, leads, curves, events = [], [], [], []
     with mlflow.start_run(run_name=f"{cfg.mlflow.experiment}.{commit}"):
         mlflow.set_tags({"kind": "parent", "dataset": data.meta.dataset, "git_commit": commit})
         mlflow.log_params({"dataset_version": data.meta.version, "seeds": list(cfg.seeds)})
@@ -345,6 +358,12 @@ def run_drift(cfg: DriftRunConfig, config_path: Path) -> Path:
                 scores.append(table.assign(**tag))
                 leads.append(lead.assign(ref_f1=ref_f1, **tag))
                 curves.append(fitted.curve.assign(**tag))
+                if event is not None:
+                    table = event_windows(fitted.test, fitted.threshold, event)
+                    table["probe_roc_auc"] = [
+                        probes[model_cfg.features, w] for w in table["window"]
+                    ]
+                    events.append(table.assign(**tag))
 
         tables_dir = paths.tables_dir()
         tables_dir.mkdir(parents=True, exist_ok=True)
@@ -359,7 +378,11 @@ def run_drift(cfg: DriftRunConfig, config_path: Path) -> Path:
             lead_table,
             paths.figures_dir() / f"{stem}_drift.png",
         )
-        for artifact in (score_path, lead_path, figure):
+        artifacts = [score_path, lead_path, figure]
+        if events:
+            artifacts.append(tables_dir / f"{stem}_event.csv")
+            pd.concat(events, ignore_index=True).to_csv(artifacts[-1], index=False)
+        for artifact in artifacts:
             mlflow.log_artifact(str(artifact))
     log.info("wrote %s and %s", score_path, lead_path)
     return lead_path
