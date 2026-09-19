@@ -330,6 +330,7 @@ To regenerate: check out `mvp`, run `uv sync`, place the three Elliptic++ 2023.1
 - **`base` omits local Elliptic++ attributes.** Dropping the 15 non-graph extras keeps `raw165` comparable with published work but withholds local information from `base`.
 - **Opaque features.** The 165 Elliptic features are anonymised and their construction is undocumented. Šafář et al. (2026) argue this hides leakage (§13).
 - **One machine.** Timings come from one laptop GPU.
+- **The AMLworld GNN is a lower bound.** The SAGE edge head passes messages between learned account embeddings only; transaction features enter at the head, for the scored edge alone, and its F1 without GFP (0.05) is below XGBoost on the same six fields (0.21). Edge-aware GNNs (GIN+EU, PNA) report far higher on HI-Small (§13), so §12.3 says XGBoost beats *this* GNN, not GNNs.
 
 ## 12. Results
 
@@ -397,6 +398,8 @@ Paired-by-seed gaps (§8.3), mean and 95% t-interval over three seeds:
 All three exclude zero. `xgb.base_gfp` − `xgb.base` (+0.331 F1) is a deterministic pair and carries no interval (§8.3). On AMLworld the GFP features more than double XGBoost's F1, the reverse of Elliptic, and they help SAGE as well; XGBoost beats SAGE in both feature sets, and SAGE with GFP scores below XGBoost without it. The GFP gain is larger for XGBoost (+0.33) than for SAGE (+0.09).
 
 The test window reaches into the post-day-10 laundering tail (§9.1), so the per-day curve (`report/tables/amlworld_hi_small_curves.csv`) matters here as it does on Elliptic. On the two realistic test days (8–9) GFP takes XGBoost's F1 from 0.10–0.20 to 0.38–0.45 and SAGE's from 0.03–0.06 to 0.07–0.15; from day 10 XGBoost scores PR-AUC above 0.92 in every config and SAGE 0.57–0.91. The ranking is the same on the realistic days as over the whole window.
+
+**Alert load on the realistic days** (`scripts/readme_figures.py`, `report/tables/amlworld_alert_load.csv`, run `2546822`). Pooling test days 8–9 only (862,792 transactions, 956 laundering) and reading precision at a fixed recall off the XGBoost scores, an analyst opens 26.3 alerts per laundering case caught at recall 0.5 on the raw fields and 4.4 with GFP, and 77.0 against 40.9 at recall 0.8. Over the whole test window the recall-0.5 figures are 11.1 and 1.8; the tail after day 10 flatters both. These are curve points, not the deployed threshold (§7.2).
 
 SAGE here is the edge head (`models/sage_edge.py`) with `epochs: 10, patience: 3`, not the node model's 200 / 20 (§6.2). Every seed stopped early, at best epoch 3–5, so the epoch cap did not bind. SAGE fits took 10–13 min each; the grid took 1 h 14 min. The XGBoost-only laptop run was first stamped `7c22e3e-dirty` (§10.2); the clean rerun at `2546822` reproduced it exactly.
 
