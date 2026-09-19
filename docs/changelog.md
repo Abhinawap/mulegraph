@@ -6,6 +6,11 @@ Project history, newest first. Add a dated entry for every tag and every change 
 
 ## Unreleased
 
+### 20 Sep 2026 — AMLworld SAGE rows from the Kaggle P100 run
+- **Ran** `configs/amlworld_hi_small.yaml` on a Kaggle P100 from a clean clone at `87f1f5a` (12 fits, 1 h 14 min; SAGE fits 10–13 min each, every seed early-stopped at best epoch 3–5 of 10). XGBoost rows are identical to the laptop's `amlworld_xgb` run.
+- **Found** `sage.base` F1 0.052 ± 0.007 and `sage.base_gfp` 0.142 ± 0.031, against XGBoost's 0.209 and 0.539. Paired-by-seed F1 gaps: XGBoost − SAGE +0.157 on `base` and +0.397 on `base_gfp`, GFP − base within SAGE +0.090; every interval excludes zero. The ranking holds on the realistic test days 8–9 as well as over the laundering tail.
+- **Added** `report/tables/amlworld_hi_small_*`, `report/figures/amlworld_hi_small_curves.png` and the MLflow export `report/exports/amlworld_hi_small_runs.csv`. README, methods §12.3, status.
+
 ### 19 Sep 2026 — First Kaggle attempt: a CUDA-only bug in the SAGE edge head
 - **Fixed** `SAGEEdgeModel._infer` read `batch.input_id` after `_forward` had moved the batch to the GPU in place (PyG's `batch.to()`), so edge SAGE failed at its first validation pass on CUDA. CPU hides it: `.to("cpu")` is a no-op. The edge-SAGE fixture now also runs on CUDA when one is present (skipped in CI).
 - **Changed** the Kaggle recipe: `MPLBACKEND=Agg` (Kaggle's inline backend is not in the uv env), the dataset CSV is found under `/kaggle/input` rather than assumed at one mount path, and grep is line-buffered so progress streams.

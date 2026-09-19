@@ -96,19 +96,26 @@ its "F1 drop" is a dip, not the shutdown; the other two seeds break at t43. No d
 for SAGE either way. How many seeds dip varies between runs (four of five in an earlier one),
 because SAGE training on the GPU is not bit-reproducible; the flags and the XGBoost rows are.
 
-**On AMLworld the graph features matter a lot.** On HI-Small (5.1M transactions, 0.10%
-laundering, IBM's day split), XGBoost on the six raw transaction fields gets F1 0.21 / PR-AUC 0.11;
-with the same causal graph features it gets **F1 0.54 / PR-AUC 0.52**. That is the same direction
-and roughly the same size as IBM's own GFP paper reports (0.63 minority-class F1 for GFP+XGB under
-their protocol). Elliptic's timesteps are disconnected components, so a one-timestep graph window
-has little to see; AMLworld's accounts persist for days, and fan-in/fan-out and scatter–gather
-counts are exactly what the simulator's laundering typologies are made of.
+**On AMLworld the graph features matter a lot, and the graph model still loses.** On HI-Small
+(5.1M transactions, 0.10% laundering, IBM's day split), XGBoost on the six raw transaction fields
+gets F1 0.21 / PR-AUC 0.11; with the same causal graph features it gets **F1 0.54 / PR-AUC 0.52**.
+That is the same direction and roughly the same size as IBM's own GFP paper reports (0.63
+minority-class F1 for GFP+XGB under their protocol). Elliptic's timesteps are disconnected
+components, so a one-timestep graph window has little to see; AMLworld's accounts persist for days,
+and fan-in/fan-out and scatter–gather counts are exactly what the simulator's laundering typologies
+are made of. GraphSAGE on the same edges gets F1 0.05 on the raw fields and 0.14 with the graph
+features: GFP helps it too (+0.09, paired-by-seed interval 0.06–0.12), but XGBoost beats it by 0.16
+without GFP and 0.40 with it, and both gaps' intervals are far from zero. SAGE with GFP scores below
+XGBoost *without* it. Graph features, not a graph model, are what moved the number.
 
 One caveat the aggregate hides: ordinary traffic in HI-Small stops on day 10 and the simulator
 then finishes its laundering patterns, so 59% of the last 1,100 transactions are positive. On the
-two realistic test days (8–9) GFP takes F1 from 0.10–0.20 to 0.38–0.45; on days 10–17 every model
-scores PR-AUC > 0.92 because almost everything left is laundering. The per-day curve is in
-`report/tables/amlworld_xgb_curves.csv`.
+two realistic test days (8–9) GFP takes XGBoost's F1 from 0.10–0.20 to 0.38–0.45, and SAGE gets
+0.03–0.06 without it and 0.07–0.15 with it; on days 10–17 XGBoost scores PR-AUC > 0.92 because
+almost everything left is laundering, and SAGE 0.57–0.91. The ranking is the same on the realistic
+days as over the whole window:
+
+![AMLworld per-day F1](report/figures/amlworld_hi_small_curves.png)
 
 ## Results tables
 
@@ -139,13 +146,15 @@ which is the number you would report if you did not know about leakage.
 |---|---|---|---|---|
 | xgb.base (6 transaction fields) | 0.209 | 0.109 | 0.090 | 0.034 |
 | xgb.base_gfp (+ GFP, 24 h window) | **0.539** | **0.521** | 0.570 | 0.099 |
-| sage.base | *Kaggle run pending — see `kaggle/amlworld_sage.md`* | | | |
-| sage.base_gfp | *Kaggle run pending* | | | |
+| sage.base | 0.052 ± 0.007 | 0.024 ± 0.004 | 0.018 ± 0.011 | 0.010 ± 0.004 |
+| sage.base_gfp | 0.142 ± 0.031 | 0.082 ± 0.017 | 0.043 ± 0.019 | 0.019 ± 0.011 |
 
 Three seeds; XGBoost with library defaults is deterministic so the interval is zero. The GraphSAGE
 edge model (learned account embeddings, `LinkNeighborLoader` with temporal sampling so no seed edge
-sees a later edge) is built and tested; the 10M-edge undirected graph does not fit the laptop's
-host memory alongside the sampler, so its rows come from a Kaggle P100 notebook.
+sees a later edge) needs more host memory for the 10M-edge undirected graph and its sampler than the
+laptop has, so the whole grid ran in a Kaggle P100 notebook (`kaggle/amlworld_sage.md`, commit
+`87f1f5a`; 1 h 14 min, 10–13 min per SAGE fit). Its XGBoost rows are identical to the laptop's. SAGE runs up to 10 epochs with
+patience 3; every seed stopped early, at best epoch 3–5, so the cap did not bind.
 
 ## What didn't work, and what I would do next
 
