@@ -68,11 +68,13 @@ better as noise than as an early signal. The feature detectors see only the feat
 flags are the same for every model and seed; XGBoost's five seeds also give identical fits. The
 table is one observation of one event, not five.
 
-\*The SAGE drop is not the collapse. In four of five seeds SAGE's F1 sits below its drop level at
-t39–t40 (0.49 and 0.55 against 0.56 in the figure), recovers to 0.81 by t42, and then collapses at
-t43 like XGBoost. The two-timestep rule reads that early dip as the break, so its lead of −9 is
-measured from a dip, not the shutdown. Against t43 it is −5, the same as XGBoost, which is what
-the fifth seed shows.
+\*The SAGE drop is not the collapse. In three of five seeds SAGE's F1 sits just below its drop
+level at t39–t40 (about 0.50 and 0.55 against 0.57 in the figure), recovers to about 0.8 by t42,
+and then collapses at t43 like XGBoost. The two-timestep rule reads that early dip as the break, so
+its lead of −9 is measured from a dip, not the shutdown. Against t43 it is −5, the same as XGBoost,
+which is what the other two seeds show. How many seeds dip varies between runs (four of five in an
+earlier one), because SAGE training on the GPU is not bit-reproducible; the flags and the XGBoost
+rows are.
 
 **On AMLworld the graph features matter a lot.** On HI-Small (5.1M transactions, 0.10%
 laundering, IBM's day split), XGBoost on the six raw transaction fields gets F1 0.21 / PR-AUC 0.11;
