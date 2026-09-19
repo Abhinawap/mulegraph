@@ -11,7 +11,9 @@
 # row with the first timestep where test F1 stays 20% below the validation mean
 # for two batches (~t43, the dark-market shutdown). `event: 43` adds a table
 # comparing t38-42 with t43-49: how the fitted model transfers to each, and how
-# well XGBoost refit inside each window alone separates it (the probe).
+# well XGBoost refit inside each window alone separates it (the probe). An "alert"
+# detector compares the share of units at or above the validation-chosen decision
+# threshold against that same share in the reference window, as an |log ratio|.
 
 dataset:
   name: elliptic_pp
@@ -39,7 +41,7 @@ models:
 seeds: [0, 1, 2, 3, 4]
 
 drift:
-  detectors: [psi, ks, conf]
+  detectors: [psi, ks, conf, alert]
   bins: 10
   ks_alpha: 0.01
   calibrate: true

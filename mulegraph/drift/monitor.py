@@ -7,17 +7,18 @@ from collections.abc import Callable, Sequence
 import numpy as np
 import pandas as pd
 
-from mulegraph.drift.detectors import conf_shift, ks_frac, psi
+from mulegraph.drift.detectors import alert_shift, conf_shift, ks_frac, psi
 
 
 def _scorers(
-    detectors: Sequence[str], bins: int, ks_alpha: float
+    detectors: Sequence[str], bins: int, ks_alpha: float, threshold: float
 ) -> dict[str, Callable[[np.ndarray, np.ndarray, np.ndarray, np.ndarray], float]]:
     """Each scorer maps ``(ref_x, cur_x, ref_p, cur_p)`` to one number that rises with drift."""
     table = {
         "psi": lambda rx, cx, rp, cp: float(psi(rx, cx, bins).max()),
         "ks": lambda rx, cx, rp, cp: ks_frac(rx, cx, ks_alpha),
         "conf": lambda rx, cx, rp, cp: conf_shift(rp, cp)[0],
+        "alert": lambda rx, cx, rp, cp: alert_shift(rp, cp, threshold),
     }
     return {name: table[name] for name in detectors}
 
@@ -34,6 +35,8 @@ def score_batches(
     ks_alpha: float,
     ks_frac_flag: float,
     conf_flag: float,
+    alert_flag: float,
+    threshold: float,
     calibrate: bool,
 ) -> pd.DataFrame:
     """Score every non-reference batch against the reference batches; rows are all units.
@@ -46,8 +49,8 @@ def score_batches(
     ref = np.isin(batch, ref_batches)
     if not ref.any():
         raise ValueError(f"no rows fall in the reference batches {ref_batches.tolist()}")
-    scorers = _scorers(detectors, bins, ks_alpha)
-    thresholds = {"psi": psi_flag, "ks": ks_frac_flag, "conf": conf_flag}
+    scorers = _scorers(detectors, bins, ks_alpha, threshold)
+    thresholds = {"psi": psi_flag, "ks": ks_frac_flag, "conf": conf_flag, "alert": alert_flag}
     if calibrate:
         present = [b for b in ref_batches if (batch == b).any()]
         if len(present) < 2:
