@@ -44,9 +44,10 @@ any validation timestep gets against the other two) stops that. What is left fli
 
 ```
 timestep            38 39 40 41 42 43 44 45 46 47 48 49
-PSI on features      .  X  .  X  .  .  .  .  X  .  X  X
+PSI on features      .  X  .  X  .  .  .  .  X  .  .  .
 KS on features       .  .  X  .  .  X  .  .  .  X  .  X
 KS on XGBoost scores .  .  .  .  .  .  .  .  .  .  .  X
+XGBoost alert rate   X  X  .  .  .  X  .  .  X  X  .  .
 ```
 
 An earlier version of this README counted the first single flag and reported 3–4 timesteps of
@@ -56,25 +57,32 @@ row rule gives:
 
 | model (features)   | detector           | first held flag | F1 drop | lead (timesteps) |
 |--------------------|--------------------|----------------:|--------:|-----------------:|
-| xgb (local + GFP)  | PSI on features    | t48             | t43     | −5               |
+| xgb (local + GFP)  | PSI on features    | never           | t43     | —                |
 | xgb (local + GFP)  | KS on features     | never           | t43     | —                |
 | xgb (local + GFP)  | KS on model scores | never           | t43     | —                |
-| sage (local + GFP) | PSI on features    | t48             | t39*    | −9               |
-| sage (local + GFP) | KS on features     | never           | t39*    | —                |
-| sage (local + GFP) | KS on model scores | never           | t39*    | —                |
+| xgb (local + GFP)  | alert rate         | t38†            | t43     | +5†              |
+| sage (local + GFP) | all four           | never           | t39*    | —                |
 
 PSI goes quiet through t42–t45, exactly while XGBoost breaks, so the flags at t39 and t41 read
 better as noise than as an early signal. The feature detectors see only the features, so their
 flags are the same for every model and seed; XGBoost's five seeds also give identical fits. The
 table is one observation of one event, not five.
 
+†The alert rate, the share of scored units above the validation threshold, is the one detector
+that reacts to t43: XGBoost's alerts fall from 4.4% of units in the reference window to 1.5%, a
+score of 1.34 against a calibrated flag of 0.38, the largest signal any detector gives anywhere.
+It does not hold: at t44 the model fires again at a normal rate, on the wrong units. Its held flag
+at t38–39 is the opposite movement, alerts rising to 7.6% as the illicit share doubles at t38, so
+the lead of +5 the rule assigns is credit for a different change, not a warning of the shutdown.
+For SAGE the reference timesteps disagree with each other more (flag 0.75–0.78) and the alert rate
+never flags.
+
 \*The SAGE drop is not the collapse. In three of five seeds SAGE's F1 sits just below its drop
 level at t39–t40 (about 0.50 and 0.55 against 0.57 in the figure), recovers to about 0.8 by t42,
 and then collapses at t43 like XGBoost. The two-timestep rule reads that early dip as the break, so
-its lead of −9 is measured from a dip, not the shutdown. Against t43 it is −5, the same as XGBoost,
-which is what the other two seeds show. How many seeds dip varies between runs (four of five in an
-earlier one), because SAGE training on the GPU is not bit-reproducible; the flags and the XGBoost
-rows are.
+its "F1 drop" is a dip, not the shutdown; the other two seeds break at t43. No detector holds a flag
+for SAGE either way. How many seeds dip varies between runs (four of five in an earlier one),
+because SAGE training on the GPU is not bit-reproducible; the flags and the XGBoost rows are.
 
 **On AMLworld the graph features matter a lot.** On HI-Small (5.1M transactions, 0.10%
 laundering, IBM's day split), XGBoost on the six raw transaction fields gets F1 0.21 / PR-AUC 0.11;
@@ -147,6 +155,14 @@ host memory alongside the sampler, so its rows come from a Kaggle P100 notebook.
   flickers. I first scored lead time from the first single flag and got 3–4 timesteps of warning;
   asking for two flags in a row, as the F1 drop already did, removes it. A proper treatment would
   use a permutation test per batch and a longer reference window.
+- **PSI was blind to constant reference columns on every real run.** Importing snapml switches the
+  process to flush-to-zero, so the subnormal cut PSI placed just above a constant reference value
+  collapsed back onto it and any shift in that column scored 0. It surfaced as a test that passed
+  alone and failed after the pipeline tests. The bins are now closed on the right and need no
+  subnormal; with them PSI's calibrated flag rises from 1.52 to 1.90 and its t48 flag goes away.
+- **A domain-classifier detector is useless on Elliptic.** XGBoost told every test timestep apart
+  from the reference window at ROC-AUC ≥ 0.99, before and after the shutdown, so it is saturated
+  and never ran in the toolkit.
 - **Not done:** a `temporal_inductive` regime on AMLworld (test accounts unseen in training), paired
   significance tests between configs, and drift injection with known typologies. Each is a few days.
 
@@ -189,6 +205,7 @@ uv sync
 uv run mulegraph smoke                                            # 10 s, synthetic graph, CI
 uv run mulegraph run   --config configs/elliptic_mvp.yaml         # 50 fits, ~9 min on an RTX 4060
 uv run mulegraph drift --config configs/elliptic_drift.yaml       # the headline figure, ~3.5 min
+uv run mulegraph run   --config configs/elliptic_rolling.yaml     # fixed vs rolling refit, ~1.5 h
 uv run mulegraph run   --config configs/amlworld_hi_small.yaml    # see below
 uv run mlflow ui --backend-store-uri sqlite:///mlruns/mlflow.db
 ```
