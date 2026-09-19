@@ -1,6 +1,6 @@
 # Methods
 
-The method and results as the code implements them. Elliptic numbers are from the run at `ec4501f` (tag `mvp`); definitions cite the requirement ids in [design.md](design.md). The non-obvious engineering facts behind these definitions are in [project_status.md](project_status.md) → *Verified method notes*.
+The method and results as the code implements them. Elliptic numbers are from the run at `afe6ef5`, the committed results table (§10.4); definitions cite the requirement ids in [design.md](design.md). The non-obvious engineering facts behind these definitions are in [project_status.md](project_status.md) → *Verified method notes*.
 
 ---
 
@@ -60,7 +60,7 @@ The loader reads only the 167 columns it keeps (identifier, timestep and the 165
 
 ### 4.1 Backend and input
 
-Graph features come from IBM's Graph Feature Preprocessor, `snapml.GraphFeaturePreprocessor`, version 1.17.2 (Blanuša et al., 2024). It installs from a wheel on Python 3.11, so the `igraph` fallback once planned was never built; requesting it raises an error that says so (PR-F1).
+Graph features come from IBM's Graph Feature Preprocessor, `snapml.GraphFeaturePreprocessor`, version 1.17.2 (Blanuša et al., 2024). It installs from a wheel on Python 3.11, so the `igraph` fallback once planned was never built (PR-F1).
 
 GFP works on edges. The builder (`mulegraph/features/builder.py`) passes it one row per edge, `[edge_id, source, target, timestamp, dummy]`. Elliptic has no transaction amounts, and GFP's vertex statistics need a numeric column to point at, so the fifth column is a constant 1.0.
 
@@ -129,7 +129,7 @@ Downstream code indexes GFP's output by position. `probe_layout` derives the exp
 
 ### 4.7 Feature version
 
-`feature_version` is the first 16 hex characters of a sha256 over the canonical JSON of the full feature definition: backend, snapml version, families, bins, window, cycle bound, vertex-statistic switch and codes, aggregation name, drive pattern, edge and node column lists, dataset name and version, and the raw-file hash (PR-F3). The thread count is excluded because output does not depend on it. The Elliptic features hash to `d6e912c8fcb83f3b`. The builder caches the matrix as Parquet under that name, with a JSON sidecar holding the definition and per-timestep timings. Computing all 49 timesteps took 2.6 s.
+`feature_version` is the first 16 hex characters of a sha256 over the canonical JSON of the full feature definition: backend, snapml version, families, bins, window, cycle bound, vertex-statistic switch and codes, aggregation name, drive pattern, edge and node column lists, dataset name and version, and the raw-file hash (PR-F3). The thread count is excluded because output does not depend on it. The Elliptic features behind the §12 results hash to `d6e912c8fcb83f3b`; adding the `unit` key on 17 Sep moved the current version to `a22c7accccccd0ed` over the same columns. The builder caches the matrix as Parquet under that name, with a JSON sidecar holding the definition and per-timestep timings. Computing all 49 timesteps took 2.6 s.
 
 Runs that use no graph features (`base`, `raw165`) log `feature_version = none`; the parent run logs the GFP version.
 
@@ -245,15 +245,15 @@ Every fit also scores each test timestep separately (`eval/curves.py`): F1 at th
 
 A comparison of interest (`base` against `base_gfp` within a model; XGBoost against SAGE within a feature set; `raw165` against `base_gfp`) is significant only as a paired-by-seed difference, *d<sub>s</sub>* = metric(A, *s*) − metric(B, *s*), whose t-interval over the five *d<sub>s</sub>* excludes zero.
 
-XGBoost trial 0 is deterministic (§6.1). For an XGBoost-versus-XGBoost pair all five paired differences are identical, the paired standard deviation is zero, and the interval collapses to a point, so any nonzero difference would be "significant" with no variance behind it. Such pairs are degenerate and no significance is claimed for them. Adding `subsample < 1` to trial 0 to manufacture variance is ruled out: it would move XGBoost's point estimate to make an interval behave. The results tables therefore report point estimates and seed intervals; the only gap that could be tested is XGBoost against SAGE, where the gaps are large enough that the intervals do not overlap.
+XGBoost trial 0 is deterministic (§6.1). For an XGBoost-versus-XGBoost pair all five paired differences are identical, the paired standard deviation is zero, and the interval collapses to a point, so any nonzero difference would be "significant" with no variance behind it. Such pairs are degenerate and no significance is claimed for them. Adding `subsample < 1` to trial 0 to manufacture variance is ruled out: it would move XGBoost's point estimate to make an interval behave. The results tables therefore report point estimates and seed intervals; the only gap that could be tested is XGBoost against SAGE. Because XGBoost is constant across seeds, that paired interval is the SAGE seed interval shifted by the XGBoost value, so it excludes zero exactly when SAGE's interval does not reach the XGBoost point estimate, which holds for F1 on both splits.
 
-### 8.5 One run, one table
+### 8.4 One run, one table
 
 The reporter builds the results table from the child runs of **one** MLflow parent run, the one the pipeline has just finished. Before we added this scoping, rerunning a config into the same experiment counted the earlier children as extra seeds: five seeds run twice reported `n_seeds = 10`, and the half-width became *t*<sub>9</sub>/√10 instead of *t*<sub>4</sub>/√5, about 40% of its honest width, from no new information. `n_seeds` in a table is the *n* the protocol ran.
 
 ## 9. No hyperparameter search
 
-Every fit uses its model's fixed reference configuration, trial 0 (D2). `search.enabled` is false in every config and the schema refuses `true`. Every child run logs `trials_completed = 0`, an honest zero rather than a nominal 1, and `trial0_source` (`xgboost_defaults` or `sage_default_2x64`). The comparison is therefore between untuned reference models under one protocol; a tuned comparison would need an equal wall-clock search budget per model, which was not run.
+Every fit uses its model's fixed reference configuration, trial 0 (D2). The config schema has no search setting. Every child run logs `trials_completed = 0`, an honest zero rather than a nominal 1, and `trial0_source` (`xgboost_defaults` or `sage_default_2x64`). The comparison is therefore between untuned reference models under one protocol; a tuned comparison would need an equal wall-clock search budget per model, which was not run.
 
 ### 9.1 AMLworld HI-Small
 
@@ -281,7 +281,7 @@ Nested runs inherit nothing from their parent, so the identity and provenance fi
 
 ### 10.2 Dirty trees
 
-If the working tree has uncommitted changes, the pipeline stamps every run's commit as `<sha>-dirty`, and the stamp flows into the `commit` column of the results CSV. A warning on stderr disappears; the stamp stays with the numbers. The Elliptic results carry the clean stamp `ec4501f`.
+If the working tree has uncommitted changes, the pipeline stamps every run's commit as `<sha>-dirty`, and the stamp flows into the `commit` column of the results CSV. A warning on stderr disappears; the stamp stays with the numbers. The Elliptic results table carries the clean stamp `afe6ef5`.
 
 ### 10.3 Environment
 
@@ -304,16 +304,16 @@ If the working tree has uncommitted changes, the pipeline stamps every run's com
 
 | Item | Value |
 |---|---|
-| Code that produced the results | `ec4501f` |
-| Tag | `mvp`, on the merge commit that carries the MLflow export (code identical to `ec4501f`) |
-| MLflow parent run | `341e0f93709f487187f8ca276ff60d6a` (50 children) |
+| Code that produced the results | `afe6ef5` (models, features and splits identical to `ec4501f`) |
+| MLflow parent run | `ba1e269a1401499aa54f6557e505a564` (50 children) |
+| First tagged run | `341e0f93709f487187f8ca276ff60d6a` at `ec4501f`, tag `mvp`; XGBoost rows identical, SAGE rows within GPU nondeterminism |
 | Superseded first run | `281caef1ade34e42aecd51bf2ab1e8a8` at `a64a16e` (unscaled SAGE inputs) |
-| Results table | `report/tables/elliptic_mvp_results.csv`, 50 rows (git-ignored; regenerated by the run) |
+| Results table | `report/tables/elliptic_mvp_results.csv`, committed |
 | Committed export | `report/exports/mvp_elliptic_mvp_runs.csv`, all 102 runs of both parents (`d16baab`) |
 | Feature version | `d6e912c8fcb83f3b` |
 | Split hashes | random `408c823763f1f17f`; temporal `f576c23d95a59084` |
 
-To regenerate: check out `mvp`, run `uv sync`, place the three Elliptic++ 2023.1 CSVs in `data/raw/elliptic_pp/2023.1/`, and run `uv run mulegraph run --config configs/elliptic_mvp.yaml`. A run from the tag stamps the tagged merge commit, not `ec4501f`. XGBoost rows should reproduce exactly; SAGE rows reproduce within GPU nondeterminism.
+To regenerate: check out `mvp`, run `uv sync`, place the three Elliptic++ 2023.1 CSVs in `data/raw/elliptic_pp/2023.1/`, and run `uv run mulegraph run --config configs/elliptic_mvp.yaml`. A run from the tag stamps the tagged merge commit. XGBoost rows reproduce exactly; SAGE rows reproduce within GPU nondeterminism, which is the whole difference between the `mvp` run and the `afe6ef5` run in §12.2.
 
 ## 11. Limitations
 
@@ -321,15 +321,15 @@ To regenerate: check out `mvp`, run `uv sync`, place the three Elliptic++ 2023.1
 - **Elliptic has one natural drift event.** The dark-market shutdown at t43 is a single observation. Any lead time a detector shows on it (S3) is reported as one observation, not an estimate of detector performance.
 - **The Elliptic temporal test mixes two regimes.** Test F1 averages a period where every model works (t38–42) with one where none does (t43–49), and validation (t35–37) precedes the shutdown. The headline mean needs the per-window numbers of §12 beside it.
 - **No search.** Every result is trial 0. The XGBoost reference is library defaults and the SAGE reference is partly our choice; neither is tuned.
-- **Deterministic XGBoost.** Trial 0 shows no retraining variance, so XGBoost's zero-width intervals mean "retraining changes nothing", not certainty (§8.4).
+- **Deterministic XGBoost.** Trial 0 shows no retraining variance, so XGBoost's zero-width intervals mean "retraining changes nothing", not certainty (§8.3).
 - **GFP has little to see on Elliptic.** Timestep components are disconnected and the window is one timestep, so graph patterns are small and sparse. This limits what the feature gap can show on Elliptic.
 - **`base` omits local Elliptic++ attributes.** Dropping the 15 non-graph extras keeps `raw165` comparable with published work but withholds local information from `base`.
 - **Opaque features.** The 165 Elliptic features are anonymised and their construction is undocumented. Šafář et al. (2026) argue this hides leakage (§13).
 - **One machine.** Timings come from one laptop GPU.
 
-## 12. Elliptic results
+## 12. Results
 
-### 12.1 Per-window F1 on the temporal test
+### 12.1 Elliptic: per-window F1 on the temporal test
 
 The temporal test window contains the t43 shutdown, and the mean over t38–49 hides it. We refitted the three deterministic XGBoost configs at `a64a16e` (seed 0; these rows are bit-identical to `ec4501f`) and scored each test window separately:
 
@@ -343,7 +343,7 @@ The temporal test window contains the t43 shutdown, and the mean over t38–49 h
 
 These per-window numbers come from an ad hoc refit; the per-timestep curves written by every run (`report/tables/<experiment>_curves.csv`, §8.2) are the committed code path and supersede them.
 
-### 12.2 Headline means (`ec4501f`)
+### 12.2 Elliptic: headline means (`afe6ef5`)
 
 Across-seed mean ± half-width of the 95% t-interval, *n* = 5, from `report/tables/elliptic_mvp_results.csv`.
 
@@ -354,8 +354,8 @@ Across-seed mean ± half-width of the 95% t-interval, *n* = 5, from `report/tabl
 | `xgb.raw165` | 0.778 ± 0.000 | 0.739 ± 0.000 | 0.995 ± 0.000 | 0.194 ± 0.000 |
 | `xgb.base` | 0.722 ± 0.000 | 0.726 ± 0.000 | 0.983 ± 0.000 | 0.196 ± 0.000 |
 | `xgb.base_gfp` | 0.718 ± 0.000 | 0.715 ± 0.000 | 0.998 ± 0.000 | 0.159 ± 0.000 |
-| `sage.base` | 0.593 ± 0.020 | 0.577 ± 0.074 | 0.734 ± 0.062 | 0.205 ± 0.009 |
-| `sage.base_gfp` | 0.566 ± 0.019 | 0.573 ± 0.033 | 0.662 ± 0.058 | 0.193 ± 0.013 |
+| `sage.base` | 0.591 ± 0.033 | 0.550 ± 0.038 | 0.705 ± 0.068 | 0.200 ± 0.011 |
+| `sage.base_gfp` | 0.560 ± 0.023 | 0.577 ± 0.031 | 0.652 ± 0.062 | 0.186 ± 0.014 |
 
 **Random**
 
@@ -364,12 +364,39 @@ Across-seed mean ± half-width of the 95% t-interval, *n* = 5, from `report/tabl
 | `xgb.raw165` | 0.959 ± 0.000 | 0.991 ± 0.000 | 1.000 ± 0.000 | 1.000 ± 0.000 |
 | `xgb.base` | 0.950 ± 0.000 | 0.987 ± 0.000 | 1.000 ± 0.000 | 1.000 ± 0.000 |
 | `xgb.base_gfp` | 0.950 ± 0.000 | 0.987 ± 0.000 | 1.000 ± 0.000 | 1.000 ± 0.000 |
-| `sage.base` | 0.902 ± 0.007 | 0.952 ± 0.005 | 0.992 ± 0.006 | 0.985 ± 0.002 |
-| `sage.base_gfp` | 0.900 ± 0.005 | 0.950 ± 0.002 | 0.995 ± 0.004 | 0.976 ± 0.007 |
+| `sage.base` | 0.907 ± 0.008 | 0.953 ± 0.005 | 0.994 ± 0.003 | 0.986 ± 0.005 |
+| `sage.base_gfp` | 0.900 ± 0.009 | 0.948 ± 0.004 | 0.994 ± 0.004 | 0.978 ± 0.006 |
 
-The random split inflates F1 by 0.18 to 0.33 over the temporal split for every config. On both splits XGBoost scores above SAGE, `raw165` scores highest, and adding GFP features does not raise F1 for either model. These are readings of point estimates; §8.3 says which gaps can be tested.
+The random split inflates F1 by 0.18 to 0.34 over the temporal split for every config. On both splits XGBoost scores above SAGE, `raw165` scores highest, and adding GFP features does not raise F1 for either model. These are readings of point estimates; §8.3 says which gaps can be tested.
 
 The GFP result is coherent with the field: on Elliptic the timestep components are disconnected, so a one-timestep GFP window has little to see, and Maganti (2026) finds the real edges carry less signal than shuffled ones under shift. On AMLworld, where GFP is IBM's own headline, the same two-by-two shows whether that reverses.
+
+### 12.3 AMLworld HI-Small (`7c22e3e-dirty`)
+
+Temporal split, days 0–5 / 6–7 / 8–17 (§9.1), three seeds, from `report/tables/amlworld_xgb_results.csv`. XGBoost is deterministic, so the intervals are zero (§8.3).
+
+| Config | F1 | PR-AUC | P@R0.5 | P@R0.8 |
+|---|---|---|---|---|
+| `xgb.base` | 0.209 | 0.109 | 0.090 | 0.034 |
+| `xgb.base_gfp` | 0.539 | 0.521 | 0.570 | 0.099 |
+
+On AMLworld the GFP features more than double F1, the reverse of Elliptic. The test window reaches into the post-day-10 laundering tail (§9.1), so the per-day curve (`report/tables/amlworld_xgb_curves.csv`) matters here as it does on Elliptic: on the two realistic test days (8–9) GFP takes F1 from 0.10–0.20 to 0.38–0.45, and from day 10 every config scores PR-AUC above 0.92. The SAGE rows need the Kaggle run in `kaggle/amlworld_sage.md`. The run was made from a working tree with uncommitted changes, and its `-dirty` stamp (§10.2) says so; it is rerun from a clean commit before these numbers are tagged.
+
+### 12.4 Drift monitor on the t43 shutdown (`625947c`)
+
+`mulegraph drift --config configs/elliptic_drift.yaml` fits `xgb.base_gfp` and `sage.base_gfp` on the temporal split, then scores every unit from t35 to t49 with no labels (design §3.4, PR-R2). The reference is the validation window t35–37. Three detectors run per batch: maximum PSI over feature columns, the fraction of feature columns whose KS test rejects at 0.01, and the KS statistic on the model's scores. With textbook flags (PSI > 0.2, KS p < 0.01) every test batch is flagged, because at 2,500–7,000 rows a batch the tests reject almost anything. Each flag is therefore calibrated to the detector's largest leave-one-out score inside the reference window.
+
+A model counts as broken at the first timestep that starts two consecutive batches of F1 more than 20% below its validation mean. A detector warns at the first timestep that starts two consecutive flags. Lead time is the first minus the second. Both need the same persistence; an earlier rule that counted a single flag reported 3–4 timesteps of warning that disappear under the symmetric rule. The validation mean is F1 at the threshold chosen on that window, so it is optimistic (design §3.4).
+
+| Model | Detector | First held flag | F1 drop | Lead |
+|---|---|---|---|---|
+| `xgb.base_gfp` | PSI on features | t48 | t43 | −5 |
+| `xgb.base_gfp` | KS on features | never | t43 | — |
+| `xgb.base_gfp` | KS on scores | never | t43 | — |
+| `sage.base_gfp` | PSI on features | t48 | t39 (3 seeds), t43 (2 seeds) | −9 / −5 |
+| `sage.base_gfp` | KS on features, KS on scores | never | as above | — |
+
+No detector warns before the collapse. The SAGE drop at t39 is a dip below the drop level that recovers by t42, not the shutdown. Feature detectors see only features, so their flags are identical across models and seeds, and XGBoost's seeds give identical fits: this is one observation of one event (§11). Tables: `report/tables/elliptic_drift_scores.csv`, `report/tables/elliptic_drift_lead_time.csv`.
 
 ## 13. Related work and positioning
 
@@ -377,12 +404,12 @@ The GFP result is coherent with the field: on Elliptic the timestep components a
 
 Train t1–34, test from t35 (ours starts at t38 after a validation block at t35–37, which is stricter). Illicit-class F1, mean over seeds where reported.
 
-| Model | Ours (`ec4501f`) | Weber 2019 | Maganti 2026 |
+| Model | Ours (`afe6ef5`) | Weber 2019 | Maganti 2026 |
 |---|---|---|---|
 | Trees on all 165 features | 0.778 | 0.788 (RF) | 0.821 ± 0.003 (RF, 10 seeds) |
 | Trees on 93 local features | 0.722 | 0.694 (RF) | — |
 | Trees on local + causal GFP | 0.718 | — | — (not tried) |
-| GraphSAGE | 0.593 ± 0.020 | — | 0.689 ± 0.017 |
+| GraphSAGE | 0.591 ± 0.033 | — | 0.689 ± 0.017 |
 | GCN / Skip-GCN | — | 0.628 / 0.705 | 0.503 (GCN) |
 | MLP | — | 0.653 | 0.549 |
 

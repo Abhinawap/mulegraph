@@ -27,7 +27,7 @@ features first holds a flag at t48, five timesteps after XGBoost broke.*
 **I expected the graph features to help on Elliptic. They did not, and the graph model did worse.**
 Under the temporal split (train ≤ t34, validate t35–37, test t38–49), XGBoost on the 93 local features gets
 illicit-class F1 0.72; adding causal graph features (fan-in/out, degree, scatter–gather, short cycles
-computed only from past edges) leaves it at 0.72; GraphSAGE gets 0.59 ± 0.03 with or without them.
+computed only from past edges) leaves it at 0.72; GraphSAGE gets 0.59 ± 0.03, and 0.56 ± 0.02 with them.
 The published 165-feature block — which already contains one hop of neighbour aggregation — is the
 best single row at 0.78. That is the same shape as Weber et al. (2019) and Maganti (2026) found.
 
@@ -38,7 +38,7 @@ t43 on, when a dark-market shutdown changed what illicit activity looked like. T
 ![Per-timestep F1](report/figures/elliptic_mvp_curves.png)
 
 **The label-free monitor did not warn before the collapse.** My first run with textbook thresholds
-(PSI ≥ 0.2, KS p < 0.01) flagged every test timestep from t38, because at 3,000 rows a batch those
+(PSI ≥ 0.2, KS p < 0.01) flagged every test timestep from t38, because at 2,500–7,000 rows a batch those
 tests reject almost anything. Calibrating each detector on its own noise floor (the largest score
 any validation timestep gets against the other two) stops that. What is left flickers:
 
@@ -87,7 +87,7 @@ counts are exactly what the simulator's laundering typologies are made of.
 One caveat the aggregate hides: ordinary traffic in HI-Small stops on day 10 and the simulator
 then finishes its laundering patterns, so 59% of the last 1,100 transactions are positive. On the
 two realistic test days (8–9) GFP takes F1 from 0.10–0.20 to 0.38–0.45; on days 10–17 every model
-scores PR-AUC > 0.93 because almost everything left is laundering. The per-day curve is in
+scores PR-AUC > 0.92 because almost everything left is laundering. The per-day curve is in
 `report/tables/amlworld_xgb_curves.csv`.
 
 ## Results tables
@@ -118,7 +118,7 @@ which is the number you would report if you did not know about leakage.
 | config | F1 | PR-AUC | P@R0.5 | P@R0.8 |
 |---|---|---|---|---|
 | xgb.base (6 transaction fields) | 0.209 | 0.109 | 0.090 | 0.034 |
-| xgb.base_gfp (+ GFP, 24 h window) | **0.540** | **0.521** | 0.570 | 0.099 |
+| xgb.base_gfp (+ GFP, 24 h window) | **0.539** | **0.521** | 0.570 | 0.099 |
 | sage.base | *Kaggle run pending — see `kaggle/amlworld_sage.md`* | | | |
 | sage.base_gfp | *Kaggle run pending* | | | |
 

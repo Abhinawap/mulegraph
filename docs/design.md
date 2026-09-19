@@ -109,8 +109,8 @@ Every component depends only on the shared types in `mulegraph/types.py` (`Graph
 
 1. One temporal regime only (validated). Same load, features and split as above.
 2. Each model × seed is fitted exactly as in the benchmark. The model then scores **every unit** whose `batch_id` falls in the validation or test window, labelled or not.
-3. Detectors compare each post-reference batch to the validation batches: PSI per feature column (score = max; flag ≥ 0.2), two-sample KS per column (score = fraction with p < 0.01; flag > 0.2), and KS on the model's own scores (flag p < 0.01). They receive feature values and scores only.
-4. Lead time = (first test batch starting a `drop_run`-long stretch where F1 is more than 20% below the validation mean) − (first batch starting a `drop_run`-long run of flags), per detector. The drop and the flag need the same persistence, so a one-batch flag is not a warning. Labels enter only here, in the evaluation of the detector.
+3. Detectors compare each post-reference batch to the validation batches: PSI per feature column (score = max; flag > 0.2), two-sample KS per column (score = fraction with p < 0.01; flag > 0.2), and the KS statistic on the model's own scores (flag > 0.1). With `calibrate`, each fixed flag is replaced by the detector's largest leave-one-out score inside the reference window. They receive feature values and scores only.
+4. Lead time = (first test batch starting a `drop_run`-long stretch where F1 is more than 20% below the validation mean) − (first batch starting a `drop_run`-long run of flags), per detector. The drop and the flag need the same persistence, so a one-batch flag is not a warning. Labels enter only here, in the evaluation of the detector. The validation mean is F1 at the threshold chosen on that same window, so it is optimistic and the drop level sits correspondingly high; this can make an F1 drop register earlier than it would against an out-of-sample reference.
 5. Outputs: `report/tables/<experiment>_scores.csv`, `<experiment>_lead_time.csv`, `report/figures/<experiment>_drift.png`, all logged as artifacts.
 
 ### 3.5 Storage and schemas
