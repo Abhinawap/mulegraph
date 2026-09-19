@@ -161,7 +161,7 @@ The random split is two stratified cuts with scikit-learn's `train_test_split`: 
 
 ## 6. Models
 
-Both models sit behind one protocol (`fit`, `predict_proba`, `embed`, `save`, `trial0`; PR-M5). `fit` receives the split and may read training and validation rows; the protocol forbids it to touch test.
+Both models sit behind one protocol (`fit`, `predict_proba`, `trial0`; PR-M5). `fit` receives the split and may read training and validation rows; the protocol forbids it to touch test.
 
 ### 6.1 XGBoost
 

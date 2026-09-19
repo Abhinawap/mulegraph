@@ -186,10 +186,6 @@ class Split:
             if arr.size and not np.all(np.diff(arr) > 0):
                 raise ValueError(f"{name} must be sorted and free of duplicates")
 
-    @property
-    def sizes(self) -> dict[str, int]:
-        return {"train": self.train.size, "val": self.val.size, "test": self.test.size}
-
 
 @dataclass(frozen=True, eq=False)
 class Predictions:
@@ -199,7 +195,6 @@ class Predictions:
     proba: np.ndarray  # float32 [n]; P(illicit)
     y: np.ndarray  # int64 [n]
     time: np.ndarray  # int64 [n]; for per-timestep curves (PR-E5)
-    embeddings: np.ndarray | None = None  # float32 [n, D] for GNNs
 
     def __post_init__(self) -> None:
         n = self.idx.shape[0]
@@ -209,5 +204,3 @@ class Predictions:
                 raise ValueError(f"{name} must have shape [{n}], got {arr.shape}")
         if self.proba.size and (self.proba.min() < 0.0 or self.proba.max() > 1.0):
             raise ValueError("proba must lie in [0, 1]")
-        if self.embeddings is not None and self.embeddings.shape[0] != n:
-            raise ValueError(f"embeddings must have {n} rows, got {self.embeddings.shape[0]}")

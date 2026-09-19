@@ -103,14 +103,6 @@ def test_predict_proba_shape_dtype_and_range(synthetic_ds: GraphDataset) -> None
     assert np.isfinite(proba).all()
 
 
-def test_embed_returns_hidden_representation(synthetic_ds: GraphDataset) -> None:
-    model, feats, split, _ = fit_model(synthetic_ds)
-    emb = model.embed(synthetic_ds, feats, split.test)
-    assert emb.shape == (split.test.size, TEST_PARAMS["hidden"])
-    assert emb.dtype == np.float32
-    assert np.isfinite(emb).all()
-
-
 def test_predict_before_fit_raises(synthetic_ds: GraphDataset) -> None:
     model = SAGEModel(params=TEST_PARAMS, device="cpu")
     with pytest.raises(RuntimeError, match="not fitted"):
@@ -229,17 +221,5 @@ def test_trial0_is_the_logged_reference() -> None:
 
 def test_three_layer_model_fits(synthetic_ds: GraphDataset) -> None:
     model, feats, split, info = fit_model(synthetic_ds, epochs=5, patience=5, layers=3)
-    emb = model.embed(synthetic_ds, feats, split.test)
-    assert emb.shape == (split.test.size, TEST_PARAMS["hidden"])
+    assert model.predict_proba(synthetic_ds, feats, split.test).shape == (split.test.size,)
     assert info.val_pr_auc is not None
-
-
-def test_save_writes_a_loadable_state_dict(synthetic_ds: GraphDataset, tmp_path) -> None:
-    import torch
-
-    model, _, _, _ = fit_model(synthetic_ds, epochs=3, patience=3)
-    target = model.save(tmp_path / "sage")
-    assert target.is_file()
-    state = torch.load(target, map_location="cpu", weights_only=True)
-    assert "head.weight" in state
-    assert state["head.weight"].shape == (1, TEST_PARAMS["hidden"])

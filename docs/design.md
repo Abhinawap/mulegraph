@@ -91,7 +91,7 @@ Every component depends only on the shared types in `mulegraph/types.py` (`Graph
 | Loaders | `data/` | Read raw files, build a `GraphDataset` with timestamps preserved, cache it | Dataset name, version | `GraphDataset` |
 | Feature builder | `features/` | Causal graph features via GFP, driven forward in time; version them | `GraphDataset`, feature config | `FeatureMatrix` with `feature_version` |
 | Split builder | `splits/` | Random / temporal index sets on `batch_id`; leakage checks | `GraphDataset`, regime config | `Split` with `split_hash` |
-| Models | `models/` | Train and score behind one `fit / predict_proba / embed` protocol | `GraphDataset`, `FeatureMatrix`, `Split`, seed | scores |
+| Models | `models/` | Train and score behind one `fit / predict_proba` protocol | `GraphDataset`, `FeatureMatrix`, `Split`, seed | scores |
 | Evaluator | `eval/` | Threshold on validation, metrics, seed t-intervals, per-timestep curves | `Predictions` | metric records, curves |
 | Drift monitor | `drift/` | PSI / KS / confidence shift per batch with no labels; lead time | features, scores, `batch_id` | scores, flags, lead-time table |
 | Reporter | `report/` | Aggregate MLflow child runs over seeds; figures | parent run id | files under `report/` |
@@ -154,7 +154,6 @@ data/
 class BaseModel(Protocol):
     def fit(self, data: GraphDataset, feats: FeatureMatrix, split: Split, seed: int) -> FitInfo: ...
     def predict_proba(self, data: GraphDataset, feats: FeatureMatrix, idx: np.ndarray) -> np.ndarray: ...
-    def embed(self, data: GraphDataset, feats: FeatureMatrix, idx: np.ndarray) -> np.ndarray | None: ...
 ```
 
 Detectors are plain functions over `(reference, current)` arrays: `psi`, `ks_frac`, `conf_shift`. None has a label parameter, and a test asserts it.

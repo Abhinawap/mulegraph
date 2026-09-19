@@ -8,7 +8,6 @@ from __future__ import annotations
 
 import copy
 from dataclasses import dataclass
-from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 import numpy as np
@@ -58,15 +57,12 @@ def _build_net(in_dim: int, hidden: int, layers: int, dropout: float) -> torch.n
             self.dropout = torch.nn.Dropout(dropout)
             self.head = torch.nn.Linear(hidden, 1)
 
-        def embed(self, x: torch.Tensor, edge_index: torch.Tensor) -> torch.Tensor:
+        def forward(self, x: torch.Tensor, edge_index: torch.Tensor) -> torch.Tensor:
             for i, conv in enumerate(self.convs):
                 x = torch.relu(conv(x, edge_index))
-                if i < len(self.convs) - 1:  # no dropout on the representation itself
+                if i < len(self.convs) - 1:  # no dropout before the head
                     x = self.dropout(x)
-            return x
-
-        def forward(self, x: torch.Tensor, edge_index: torch.Tensor) -> torch.Tensor:
-            return self.head(self.embed(x, edge_index)).squeeze(-1)
+            return self.head(x).squeeze(-1)
 
     return Net()
 
@@ -280,22 +276,19 @@ class SAGEModel:
             },
         )
 
-    def _infer(self, graph: _Graph, embeddings: bool = False) -> np.ndarray:
+    def _infer(self, graph: _Graph) -> np.ndarray:
         """Full-batch forward pass in eval mode."""
         import torch
 
         assert self._net is not None
         self._net.eval()
         with torch.no_grad():
-            if embeddings:
-                out = self._net.embed(graph.x, graph.edge_index)
-                return out.detach().cpu().numpy().astype(np.float32)
             logits = self._net(graph.x, graph.edge_index)
             return torch.sigmoid(logits).detach().cpu().numpy().astype(np.float32)
 
     def _require_fitted(self) -> None:
         if self._net is None:
-            raise RuntimeError("sage model is not fitted; call fit() before predict_proba/embed")
+            raise RuntimeError("sage model is not fitted; call fit() before predict_proba")
 
     def predict_proba(
         self, data: GraphDataset, feats: FeatureMatrix, idx: np.ndarray
@@ -305,24 +298,6 @@ class SAGEModel:
         graph = self._prepare(data, feats)
         proba = self._infer(graph)[np.asarray(idx, dtype=np.int64)]
         return np.clip(proba, 0.0, 1.0).astype(np.float32)
-
-    def embed(self, data: GraphDataset, feats: FeatureMatrix, idx: np.ndarray) -> np.ndarray:
-        """Hidden activations before the linear head, for ``idx``."""
-        self._require_fitted()
-        graph = self._prepare(data, feats)
-        return self._infer(graph, embeddings=True)[np.asarray(idx, dtype=np.int64)]
-
-    def save(self, path: Path) -> Path:
-        """Write the fitted weights under ``path``; returns the file written."""
-        import torch
-
-        self._require_fitted()
-        assert self._net is not None
-        path = Path(path)
-        path.mkdir(parents=True, exist_ok=True)
-        target = path / "model.pt"
-        torch.save({k: v.detach().cpu() for k, v in self._net.state_dict().items()}, target)
-        return target
 
     @classmethod
     def trial0(cls) -> tuple[dict[str, Any], str]:

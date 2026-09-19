@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from pathlib import Path
 from typing import Any, Protocol, runtime_checkable
 
 import numpy as np
@@ -23,7 +22,7 @@ class FitInfo:
 
 @runtime_checkable
 class BaseModel(Protocol):
-    """Fit on a split, score node indices, optionally expose embeddings."""
+    """Fit on a split, then score unit indices."""
 
     name: str
 
@@ -35,14 +34,6 @@ class BaseModel(Protocol):
         self, data: GraphDataset, feats: FeatureMatrix, idx: np.ndarray
     ) -> np.ndarray:
         """P(illicit) for ``idx`` as float32 in [0, 1]."""
-        ...
-
-    def embed(self, data: GraphDataset, feats: FeatureMatrix, idx: np.ndarray) -> np.ndarray | None:
-        """Representation for ``idx``, or None for models without one."""
-        ...
-
-    def save(self, path: Path) -> Path:
-        """Persist the fitted model under ``path``; returns the file written."""
         ...
 
     @classmethod

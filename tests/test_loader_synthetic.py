@@ -8,7 +8,7 @@ import numpy as np
 import pytest
 
 from mulegraph.config import DatasetConfig
-from mulegraph.data import load_dataset, subsample
+from mulegraph.data import load_dataset
 from mulegraph.data.synthetic import N_LOCAL, make_synthetic_elliptic
 from mulegraph.types import GraphDataset
 
@@ -110,19 +110,3 @@ def test_cache_round_trip(tmp_data_dir: Path) -> None:
     assert np.array_equal(first.y, second.y)
     assert second.meta.feature_blocks == first.meta.feature_blocks
     assert isinstance(next(iter(second.meta.feature_blocks.values())), tuple)
-
-
-def test_unknown_dataset_name_is_rejected(tmp_data_dir: Path) -> None:
-    cfg = DatasetConfig(name="synthetic_elliptic")
-    object.__setattr__(cfg, "name", "nope")
-    with pytest.raises(ValueError, match="Unknown dataset"):
-        load_dataset(cfg, tmp_data_dir)
-
-
-def test_subsample_keeps_only_internal_edges(synthetic_ds: GraphDataset) -> None:
-    keep = np.arange(0, synthetic_ds.num_nodes, 2, dtype=np.int64)
-    sub = subsample(synthetic_ds, keep)
-    assert sub.num_nodes == keep.size
-    assert sub.num_edges <= synthetic_ds.num_edges
-    if sub.num_edges:
-        assert sub.edge_index.max() < sub.num_nodes

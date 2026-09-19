@@ -7,8 +7,6 @@ from collections.abc import Callable
 from dataclasses import asdict
 from pathlib import Path
 
-import numpy as np
-
 from mulegraph.config import DatasetConfig
 from mulegraph.types import DatasetMeta, GraphDataset
 
@@ -67,19 +65,14 @@ def _load_cache(path: Path) -> GraphDataset:
     return GraphDataset(meta=meta, **payload)
 
 
-def load_dataset(
-    cfg: DatasetConfig, data_dir: Path, *, force: bool = False, use_cache: bool = True
-) -> GraphDataset:
+def load_dataset(cfg: DatasetConfig, data_dir: Path) -> GraphDataset:
     """Load a dataset from ``data_dir/cache``, or build it from ``data_dir/raw`` and cache it."""
-    if cfg.name not in LOADERS:
-        raise ValueError(f"Unknown dataset {cfg.name!r}; known: {sorted(LOADERS)}")
-
     # A truncated AMLworld load (max_days) must not be served as the full graph (NFR-1).
     from mulegraph.data.amlworld import cache_version
 
     version = cache_version(cfg.version, cfg.max_days)
     cache_path = data_dir / "cache" / cfg.name / version / CACHE_FILENAME
-    if use_cache and not force and cache_path.is_file():
+    if cache_path.is_file():
         log.info("loading cached graph from %s", cache_path)
         return _load_cache(cache_path)
 
@@ -95,27 +88,6 @@ def load_dataset(
         data.meta.num_timesteps,
         data.meta.label_counts,
     )
-    if use_cache:
-        _save_cache(cache_path, data)
-        log.info("cached graph to %s", cache_path)
+    _save_cache(cache_path, data)
+    log.info("cached graph to %s", cache_path)
     return data
-
-
-def subsample(data: GraphDataset, node_idx: np.ndarray) -> GraphDataset:
-    """Induced subgraph on ``node_idx``, renumbered to 0..k-1."""
-    node_idx = np.unique(np.asarray(node_idx, dtype=np.int64))
-    remap = np.full(data.num_nodes, -1, dtype=np.int64)
-    remap[node_idx] = np.arange(node_idx.size, dtype=np.int64)
-    keep = (remap[data.src] >= 0) & (remap[data.dst] >= 0)
-    return GraphDataset(
-        x=data.x[node_idx],
-        edge_index=np.stack([remap[data.src[keep]], remap[data.dst[keep]]]).astype(np.int64),
-        edge_attr=None if data.edge_attr is None else data.edge_attr[keep],
-        node_time=data.node_time[node_idx],
-        edge_time=data.edge_time[keep],
-        batch_id=data.batch_id[node_idx],
-        y=data.y[node_idx],
-        node_ids=data.node_ids[node_idx],
-        task=data.task,
-        meta=data.meta,
-    )

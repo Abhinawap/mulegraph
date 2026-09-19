@@ -15,6 +15,16 @@ from mulegraph.config import DriftRunConfig
 from mulegraph.drift.detectors import conf_shift, ks_frac, psi
 from mulegraph.drift.monitor import lead_time, score_batches
 
+#: DriftConfig's defaults, spelled out: drift/ never imports the config (coupling rule).
+FLAGS = dict(
+    detectors=("psi", "ks", "conf"),
+    bins=10,
+    psi_flag=0.2,
+    ks_alpha=0.01,
+    ks_frac_flag=0.2,
+    conf_flag=0.1,
+)
+
 
 def _shifted(delta: float, seed: int = 0) -> tuple[np.ndarray, np.ndarray]:
     rng = np.random.default_rng(seed)
@@ -58,7 +68,7 @@ def test_lead_time_is_first_drop_minus_first_flag() -> None:
             "threshold": [0.2, 0.2, 0.2, 0.2],
         }
     )
-    table = lead_time(curve, scores, ref_f1=0.9, drop=0.2).set_index("detector")
+    table = lead_time(curve, scores, ref_f1=0.9, drop=0.2, drop_run=2).set_index("detector")
 
     assert table.loc["psi", "first_drop"] == 11 and table.loc["psi", "first_flag"] == 9
     assert table.loc["psi", "lead"] == 2
@@ -100,7 +110,7 @@ def test_calibrated_thresholds_are_the_reference_noise_floor() -> None:
     proba = rng.uniform(size=2000)
     proba[batch == 11] = rng.uniform(0.5, 1.0, size=400)
 
-    table = score_batches(values, proba, batch, [1, 2, 3], calibrate=True)
+    table = score_batches(values, proba, batch, [1, 2, 3], calibrate=True, **FLAGS)
     flagged = table.set_index(["detector", "batch_id"])["flagged"]
     assert not flagged.loc[("psi", 10)] and not flagged.loc[("conf", 10)]
     assert flagged.loc[("psi", 11)] and flagged.loc[("ks", 11)] and flagged.loc[("conf", 11)]
@@ -108,7 +118,7 @@ def test_calibrated_thresholds_are_the_reference_noise_floor() -> None:
     assert floor["psi"] > 0 and floor["conf"] > 0 and floor["ks"] >= 0
 
     with pytest.raises(ValueError, match="two populated reference batches"):
-        score_batches(values, proba, batch, [1], calibrate=True)
+        score_batches(values, proba, batch, [1], calibrate=True, **FLAGS)
 
 
 @pytest.fixture

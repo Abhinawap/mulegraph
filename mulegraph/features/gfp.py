@@ -178,10 +178,6 @@ class GfpDriver:
         self._gp.set_params(dict(params))
         self._last_time: int | None = None
 
-    @property
-    def last_time(self) -> int | None:
-        return self._last_time
-
     def step(self, batch: np.ndarray) -> np.ndarray:
         """Insert and score one timestep's float64 ``[B, 5]`` edges; return float32 features."""
         if batch.ndim != 2 or batch.shape[1] != RAW_WIDTH:

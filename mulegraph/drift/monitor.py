@@ -9,8 +9,6 @@ import pandas as pd
 
 from mulegraph.drift.detectors import conf_shift, ks_frac, psi
 
-DETECTORS = ("psi", "ks", "conf")
-
 
 def _scorers(
     detectors: Sequence[str], bins: int, ks_alpha: float
@@ -29,13 +27,14 @@ def score_batches(
     proba: np.ndarray,
     batch: np.ndarray,
     ref_batches: Sequence[int],
-    detectors: Sequence[str] = DETECTORS,
-    bins: int = 10,
-    psi_flag: float = 0.2,
-    ks_alpha: float = 0.01,
-    ks_frac_flag: float = 0.2,
-    conf_flag: float = 0.1,
-    calibrate: bool = False,
+    *,
+    detectors: Sequence[str],
+    bins: int,
+    psi_flag: float,
+    ks_alpha: float,
+    ks_frac_flag: float,
+    conf_flag: float,
+    calibrate: bool,
 ) -> pd.DataFrame:
     """Score every non-reference batch against the reference batches; rows are all units.
 
@@ -84,8 +83,8 @@ def lead_time(
     curve: pd.DataFrame,
     scores: pd.DataFrame,
     ref_f1: float,
-    drop: float = 0.2,
-    drop_run: int = 2,
+    drop: float,
+    drop_run: int,
 ) -> pd.DataFrame:
     """Per detector: first ``drop_run``-long F1 fall − first ``drop_run``-long flag run (PR-R4)."""
     level = (1.0 - drop) * ref_f1

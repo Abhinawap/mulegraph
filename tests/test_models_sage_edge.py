@@ -41,12 +41,11 @@ def fitted(tmp_path: Path) -> tuple[SAGEEdgeModel, GraphDataset, FeatureMatrix, 
     return model, data, feats, split
 
 
-def test_predict_proba_and_embed_shapes(fitted) -> None:
+def test_predict_proba_shape_and_range(fitted) -> None:
     model, data, feats, split = fitted
     proba = model.predict_proba(data, feats, split.test)
     assert proba.shape == (split.test.size,) and proba.dtype == np.float32
     assert proba.min() >= 0.0 and proba.max() <= 1.0
-    assert model.embed(data, feats, split.val).shape == (split.val.size, PARAMS["hidden"])
 
 
 def test_loss_sees_train_edges_only_and_sampling_is_temporal(

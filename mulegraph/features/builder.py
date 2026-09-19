@@ -133,8 +133,6 @@ def build_features(
     data: GraphDataset,
     cfg: FeaturesConfig,
     cache_dir: Path,
-    *,
-    force: bool = False,
 ) -> FeatureMatrix:
     """Causal graph features in unit order (per edge on an edge task), cached under
     ``<cache_dir>/features/``."""
@@ -147,7 +145,7 @@ def build_features(
     parquet_path = Path(cache_dir) / "features" / f"{fv}.parquet"
     json_path = parquet_path.with_suffix(".json")
 
-    if parquet_path.is_file() and not force:
+    if parquet_path.is_file():
         log.info("features %s: cache hit at %s", fv, parquet_path)
         cached = _read_cache(parquet_path, columns, data.unit_time)
         if cached is not None:
