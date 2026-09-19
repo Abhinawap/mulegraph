@@ -72,6 +72,14 @@ def score_batches(
     return pd.DataFrame(rows, columns=["detector", "batch_id", "score", "flagged", "threshold"])
 
 
+def _first_run(times: np.ndarray, hits: np.ndarray, run: int) -> float:
+    """First time that starts ``run`` consecutive hits, or NaN."""
+    for i in range(len(hits) - run + 1):
+        if hits[i : i + run].all():
+            return float(times[i])
+    return float("nan")
+
+
 def lead_time(
     curve: pd.DataFrame,
     scores: pd.DataFrame,
@@ -79,19 +87,16 @@ def lead_time(
     drop: float = 0.2,
     drop_run: int = 2,
 ) -> pd.DataFrame:
-    """Per detector: first batch of a ``drop_run``-long F1 fall under the level − first flag."""
+    """Per detector: first ``drop_run``-long F1 fall − first ``drop_run``-long flag run (PR-R4)."""
     level = (1.0 - drop) * ref_f1
     ordered = curve.sort_values("time")
-    below = (ordered["f1"] < level).to_numpy()
-    first_drop = float("nan")
-    for i in range(len(below) - drop_run + 1):
-        if below[i : i + drop_run].all():
-            first_drop = float(ordered["time"].iloc[i])
-            break
+    first_drop = _first_run(
+        ordered["time"].to_numpy(), (ordered["f1"] < level).to_numpy(), drop_run
+    )
     rows = []
     for detector, block in scores.groupby("detector", sort=False):
-        flagged = block.loc[block["flagged"], "batch_id"]
-        first_flag = float(flagged.min()) if not flagged.empty else float("nan")
+        block = block.sort_values("batch_id")
+        first_flag = _first_run(block["batch_id"].to_numpy(), block["flagged"].to_numpy(), drop_run)
         rows.append(
             {
                 "detector": detector,

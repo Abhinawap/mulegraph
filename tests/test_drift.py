@@ -53,15 +53,15 @@ def test_lead_time_is_first_drop_minus_first_flag() -> None:
         {
             "detector": ["psi", "psi", "ks", "ks"],
             "batch_id": [9, 10, 9, 10],
-            "score": [0.1, 0.5, 0.0, 0.0],
-            "flagged": [False, True, False, False],
+            "score": [0.5, 0.5, 0.0, 0.0],
+            "flagged": [True, True, False, False],
             "threshold": [0.2, 0.2, 0.2, 0.2],
         }
     )
     table = lead_time(curve, scores, ref_f1=0.9, drop=0.2).set_index("detector")
 
-    assert table.loc["psi", "first_drop"] == 11 and table.loc["psi", "first_flag"] == 10
-    assert table.loc["psi", "lead"] == 1
+    assert table.loc["psi", "first_drop"] == 11 and table.loc["psi", "first_flag"] == 9
+    assert table.loc["psi", "lead"] == 2
     assert np.isnan(table.loc["ks", "first_flag"]) and np.isnan(table.loc["ks", "lead"])
     assert table["drop_level"].tolist() == pytest.approx([0.72, 0.72])
 
@@ -73,6 +73,22 @@ def test_a_single_dip_is_not_a_drop_but_a_sustained_one_is() -> None:
     ).assign(threshold=0.2)
     assert lead_time(curve, scores, 0.9, 0.2, drop_run=2)["first_drop"].item() == 12
     assert lead_time(curve, scores, 0.9, 0.2, drop_run=1)["first_drop"].item() == 10
+
+
+def test_a_single_flag_is_not_a_warning_but_a_sustained_one_is() -> None:
+    """Flags need the same ``drop_run`` persistence as the F1 drop (PR-R4)."""
+    curve = pd.DataFrame({"time": [9, 10, 11, 12, 13], "f1": [0.8, 0.8, 0.8, 0.3, 0.2]})
+    scores = pd.DataFrame(
+        {
+            "detector": "psi",
+            "batch_id": [13, 9, 10, 11, 12],
+            "flagged": [True, True, False, True, True],
+        }
+    ).assign(score=0.5, threshold=0.2)
+    assert lead_time(curve, scores, 0.9, 0.2, drop_run=2)["first_flag"].item() == 11
+    assert lead_time(curve, scores, 0.9, 0.2, drop_run=1)["first_flag"].item() == 9
+    flicker = scores.assign(flagged=[False, True, False, True, False])
+    assert np.isnan(lead_time(curve, flicker, 0.9, 0.2, drop_run=2)["lead"].item())
 
 
 def test_calibrated_thresholds_are_the_reference_noise_floor() -> None:

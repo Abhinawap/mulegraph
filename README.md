@@ -18,9 +18,9 @@ anyone outside a bank.
 ![Drift monitor on the Elliptic t43 collapse](report/figures/elliptic_drift_drift.png)
 
 *Test F1 per timestep on Elliptic++ (black), the level below which the model counts as broken
-(dotted), the window where it stayed broken (red), and the first timestep each label-free detector
-raised a flag (dashed). For XGBoost the feature-drift detectors fire three to four timesteps before
-the collapse; the detector that watches the model's own scores never does.*
+(dotted), the window where it stayed broken (red), and the first timestep a label-free detector
+flagged two batches in a row (dashed). None of them does so before the collapse: PSI on the
+features first holds a flag at t48, five timesteps after XGBoost broke.*
 
 ## What I found
 
@@ -37,25 +37,44 @@ t43 on, when a dark-market shutdown changed what illicit activity looked like. T
 
 ![Per-timestep F1](report/figures/elliptic_mvp_curves.png)
 
-**Feature drift is visible before performance drift, once the detector is calibrated.** My first
-run with textbook thresholds (PSI ≥ 0.2, KS p < 0.01) flagged every test timestep from t38, and for
-a while I read that as "the detectors don't work" rather than "the thresholds are wrong for 3,000
-rows a batch". Calibrating each detector on its own noise floor — the largest score any validation
-timestep gets against the other two — changes the picture:
+**The label-free monitor did not warn before the collapse.** My first run with textbook thresholds
+(PSI ≥ 0.2, KS p < 0.01) flagged every test timestep from t38, because at 3,000 rows a batch those
+tests reject almost anything. Calibrating each detector on its own noise floor (the largest score
+any validation timestep gets against the other two) stops that. What is left flickers:
 
-| model (features)   | detector           | first flag | F1 collapse | lead (timesteps) |
-|--------------------|--------------------|-----------:|------------:|-----------------:|
-| xgb (local + GFP)  | PSI on features    | t39        | t43         | **4**            |
-| xgb (local + GFP)  | KS on features     | t40        | t43         | **3**            |
-| xgb (local + GFP)  | KS on model scores | t49        | t43         | −6 (missed)      |
-| sage (local + GFP) | PSI on features    | t39        | t39         | 0                |
-| sage (local + GFP) | KS on features     | t40        | t39         | −1               |
-| sage (local + GFP) | KS on model scores | t39        | t39         | 0                |
+```
+timestep            38 39 40 41 42 43 44 45 46 47 48 49
+PSI on features      .  X  .  X  .  .  .  .  X  .  X  X
+KS on features       .  .  X  .  .  X  .  .  .  X  .  X
+KS on XGBoost scores .  .  .  .  .  .  .  .  .  .  .  X
+```
 
-The input distribution moved at t39; XGBoost kept working for four more timesteps and then broke
-when the *relationship* between features and labels changed at t43. Watching the model's score
-distribution alone would have missed that entirely. GraphSAGE had already fallen 20% below its
-validation F1 by t39, so for it "drift" and "failure" arrive together.
+An earlier version of this README counted the first single flag and reported 3–4 timesteps of
+warning for XGBoost. That rule was lopsided: a model only counted as broken after F1 stayed down
+for two timesteps, while one flag counted as a warning. Holding the detectors to the same two-in-a-
+row rule gives:
+
+| model (features)   | detector           | first held flag | F1 drop | lead (timesteps) |
+|--------------------|--------------------|----------------:|--------:|-----------------:|
+| xgb (local + GFP)  | PSI on features    | t48             | t43     | −5               |
+| xgb (local + GFP)  | KS on features     | never           | t43     | —                |
+| xgb (local + GFP)  | KS on model scores | never           | t43     | —                |
+| sage (local + GFP) | PSI on features    | t48             | t39*    | −9               |
+| sage (local + GFP) | KS on features     | never           | t39*    | —                |
+| sage (local + GFP) | KS on model scores | never           | t39*    | —                |
+
+PSI goes quiet through t42–t45, exactly while XGBoost breaks, so the flags at t39 and t41 read
+better as noise than as an early signal. The feature detectors see only the features, so their
+flags are the same for every model and seed; XGBoost's five seeds also give identical fits. The
+table is one observation of one event, not five.
+
+\*The SAGE drop is not the collapse. In three of five seeds SAGE's F1 sits just below its drop
+level at t39–t40 (about 0.50 and 0.55 against 0.57 in the figure), recovers to about 0.8 by t42,
+and then collapses at t43 like XGBoost. The two-timestep rule reads that early dip as the break, so
+its lead of −9 is measured from a dip, not the shutdown. Against t43 it is −5, the same as XGBoost,
+which is what the other two seeds show. How many seeds dip varies between runs (four of five in an
+earlier one), because SAGE training on the GPU is not bit-reproducible; the flags and the XGBoost
+rows are.
 
 **On AMLworld the graph features matter a lot.** On HI-Small (5.1M transactions, 0.10%
 laundering, IBM's day split), XGBoost on the six raw transaction fields gets F1 0.21 / PR-AUC 0.11;
@@ -122,9 +141,12 @@ host memory alongside the sampler, so its rows come from a Kaggle P100 notebook.
   `transform` inserts every batch twice and doubles every count; ingesting the whole table before
   scoring leaks the future backwards. The only correct pattern is `transform(batch_t)` for *t*
   ascending, and there is a test on a synthetic multi-timestep graph that would catch a regression.
-- **Textbook drift thresholds flag everything.** At a few thousand rows per timestep, KS at p < 0.01
-  rejects half the columns on every batch. The leave-one-out calibration above is the smallest fix
-  that gives a usable signal; a proper treatment would use a permutation test per batch.
+- **Textbook drift thresholds flag everything, and one flag is not a warning.** At a few thousand
+  rows per timestep, KS at p < 0.01 rejects half the columns on every batch. The leave-one-out
+  calibration above stops that but rests on only three reference timesteps, and what it leaves
+  flickers. I first scored lead time from the first single flag and got 3–4 timesteps of warning;
+  asking for two flags in a row, as the F1 drop already did, removes it. A proper treatment would
+  use a permutation test per batch and a longer reference window.
 - **Not done:** a `temporal_inductive` regime on AMLworld (test accounts unseen in training), paired
   significance tests between configs, and drift injection with known typologies. Each is a few days.
 
@@ -166,7 +188,7 @@ Python 3.11 and [uv](https://docs.astral.sh/uv/). Everything is pinned in `uv.lo
 uv sync
 uv run mulegraph smoke                                            # 10 s, synthetic graph, CI
 uv run mulegraph run   --config configs/elliptic_mvp.yaml         # 50 fits, ~9 min on an RTX 4060
-uv run mulegraph drift --config configs/elliptic_drift.yaml       # the headline figure, ~3 min
+uv run mulegraph drift --config configs/elliptic_drift.yaml       # the headline figure, ~3.5 min
 uv run mulegraph run   --config configs/amlworld_hi_small.yaml    # see below
 uv run mlflow ui --backend-store-uri sqlite:///mlruns/mlflow.db
 ```
