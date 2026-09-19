@@ -74,7 +74,7 @@ score of 1.34 against a calibrated flag of 0.38, the largest signal any detector
 It does not hold: at t44 the model fires again at a normal rate, on the wrong units. Its held flag
 at t38–39 is the opposite movement, alerts rising to 7.6% as the illicit share doubles at t38, so
 the lead of +5 the rule assigns is credit for a different change, not a warning of the shutdown.
-For SAGE the reference timesteps disagree with each other more (flag 0.75–0.78) and the alert rate
+For SAGE the reference timesteps disagree with each other more (flag 0.67–0.88) and the alert rate
 never flags.
 
 \*The SAGE drop is not the collapse. In three of five seeds SAGE's F1 sits just below its drop
