@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from pathlib import Path
 from typing import Any
 
 import numpy as np
@@ -109,17 +108,3 @@ class XGBModel:
         if self.clf is None:
             raise RuntimeError("XGBModel.predict_proba called before fit")
         return self.clf.predict_proba(feats.values[idx])[:, 1].astype(np.float32)
-
-    def embed(self, data: GraphDataset, feats: FeatureMatrix, idx: np.ndarray) -> np.ndarray | None:
-        """None: a tree ensemble has no representation space."""
-        return None
-
-    def save(self, path: Path) -> Path:
-        """Write the booster as version-portable JSON."""
-        if self.clf is None:
-            raise RuntimeError("XGBModel.save called before fit")
-        path = Path(path)
-        path.mkdir(parents=True, exist_ok=True)
-        target = path / "model.json"
-        self.clf.save_model(target)
-        return target

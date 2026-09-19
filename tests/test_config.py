@@ -53,11 +53,6 @@ def test_raw165_is_xgb_only() -> None:
         _cfg(models=[{"name": "sage", "features": "raw165"}])
 
 
-def test_search_enabled_is_v1a() -> None:
-    with pytest.raises(ValidationError, match="v1a"):
-        _cfg(search={"enabled": True})
-
-
 def test_temporal_inductive_parses_but_is_the_split_builders_problem() -> None:
     # D1 rejection depends on meta.cross_time_edges, which the config cannot see.
     cfg = _cfg(
@@ -125,10 +120,8 @@ def test_needs_gfp_reflects_the_model_list() -> None:
 def test_env_override_applies_and_is_visible(tmp_path: Path, monkeypatch) -> None:
     path = tmp_path / "c.yaml"
     path.write_text(yaml.safe_dump(MINIMAL))
-    monkeypatch.setenv("MULEGRAPH_FEATURE_BACKEND", "igraph")
     monkeypatch.setenv("MULEGRAPH_DEVICE", "cpu")
     cfg = load_config(path)
-    assert cfg.features.backend == "igraph"
     assert cfg.device == "cpu"
 
 

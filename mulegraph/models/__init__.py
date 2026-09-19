@@ -9,8 +9,6 @@ from mulegraph.models.base import BaseModel, FitInfo, check_train_labelled
 
 __all__ = ["BaseModel", "FitInfo", "check_train_labelled", "get_model"]
 
-KNOWN_MODELS = ("xgb", "sage", "pna")
-
 
 def get_model(
     name: str,
@@ -32,9 +30,4 @@ def get_model(
         from mulegraph.models.sage import SAGEModel
 
         return SAGEModel(params=params, device=device, sampler=sampler or SamplerConfig())
-    if name == "pna":
-        raise NotImplementedError(
-            "pna is a v1b reference row on AMLworld via IBM's Multi-GNN code; "
-            "the MVP is Elliptic-only with xgb and sage"
-        )
-    raise ValueError(f"Unknown model {name!r}; known: {KNOWN_MODELS}")
+    raise ValueError(f"Unknown model {name!r}; known: xgb, sage")

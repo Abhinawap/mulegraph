@@ -6,7 +6,6 @@ The cache key ``feature_version`` hashes the full *definition*, including the dr
 from __future__ import annotations
 
 import importlib.metadata as importlib_metadata
-import json
 import logging
 from pathlib import Path
 
@@ -48,7 +47,7 @@ def feature_definition(
 ) -> dict[str, object]:
     """The complete, hashable description of what the feature columns mean."""
     return {
-        "backend": cfg.backend,
+        "backend": "gfp",  # constant kept so existing feature versions still hash the same (PR-F3)
         "snapml_version": snapml_version(),
         "families": list(cfg.families),
         "bins": list(cfg.bins),
@@ -134,17 +133,9 @@ def build_features(
     data: GraphDataset,
     cfg: FeaturesConfig,
     cache_dir: Path,
-    *,
-    force: bool = False,
 ) -> FeatureMatrix:
     """Causal graph features in unit order (per edge on an edge task), cached under
     ``<cache_dir>/features/``."""
-    if cfg.backend == "igraph":
-        raise NotImplementedError(
-            "igraph fallback is not built: snapml GFP installed in week-1 gate 1 (9 Sep 2026), "
-            "so the fallback was retired"
-        )
-
     layout = probe_layout(cfg)
     fv = feature_version(cfg, data.meta, layout)
     edge_task = data.task == "edge"
@@ -154,7 +145,7 @@ def build_features(
     parquet_path = Path(cache_dir) / "features" / f"{fv}.parquet"
     json_path = parquet_path.with_suffix(".json")
 
-    if parquet_path.is_file() and not force:
+    if parquet_path.is_file():
         log.info("features %s: cache hit at %s", fv, parquet_path)
         cached = _read_cache(parquet_path, columns, data.unit_time)
         if cached is not None:
@@ -224,9 +215,3 @@ def build_features(
         name="gfp",
         blocks={"gfp": (0, len(columns))},
     )
-
-
-def load_definition(cache_dir: Path, fv: str) -> dict[str, object]:
-    """Read back the stored definition for a feature version, for provenance."""
-    path = Path(cache_dir) / "features" / f"{fv}.json"
-    return json.loads(path.read_text())

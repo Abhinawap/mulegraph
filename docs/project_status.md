@@ -7,6 +7,7 @@
 ## Still open
 
 - [ ] AMLworld SAGE rows from the Kaggle P100 run (`kaggle/amlworld_sage.md`), merged into the README
+- [ ] Rerun `configs/amlworld_hi_small.yaml` (XGBoost rows) from a clean commit: the committed AMLworld table is stamped `7c22e3e-dirty`
 - [ ] Tag `v1.0`
 
 What is done and when is in [changelog.md](changelog.md).

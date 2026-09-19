@@ -8,7 +8,6 @@ at time t never sees an edge after t (PR-F2). Edge features are z-scored on trai
 from __future__ import annotations
 
 import copy
-from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 import numpy as np
@@ -51,7 +50,7 @@ def _build_net(
             self.mix = torch.nn.Linear(2 * hidden + edge_dim, hidden)
             self.out = torch.nn.Linear(hidden, 1)
 
-        def embed(
+        def forward(
             self,
             n_id: torch.Tensor,
             edge_index: torch.Tensor,
@@ -61,16 +60,8 @@ def _build_net(
             h = self.emb(n_id)
             for conv in self.convs:
                 h = self.dropout(torch.relu(conv(h, edge_index)))
-            return torch.relu(self.mix(torch.cat([h[seeds[0]], h[seeds[1]], edge_x], dim=-1)))
-
-        def forward(
-            self,
-            n_id: torch.Tensor,
-            edge_index: torch.Tensor,
-            seeds: torch.Tensor,
-            edge_x: torch.Tensor,
-        ) -> torch.Tensor:
-            return self.out(self.embed(n_id, edge_index, seeds, edge_x)).squeeze(-1)
+            mixed = torch.relu(self.mix(torch.cat([h[seeds[0]], h[seeds[1]], edge_x], dim=-1)))
+            return self.out(mixed).squeeze(-1)
 
     return Net()
 
@@ -157,12 +148,13 @@ class SAGEEdgeModel:
             self.device
         )
 
-    def _forward(self, batch: Any, feats: FeatureMatrix, idx: np.ndarray, embeddings: bool = False):
+    def _forward(self, batch: Any, feats: FeatureMatrix, idx: np.ndarray):
         assert self._net is not None
         rows = idx[batch.input_id.numpy()]
         batch = batch.to(self.device)
-        fn = self._net.embed if embeddings else self._net
-        return fn(batch.n_id, batch.edge_index, batch.edge_label_index, self._edge_x(feats, rows))
+        return self._net(
+            batch.n_id, batch.edge_index, batch.edge_label_index, self._edge_x(feats, rows)
+        )
 
     def fit(self, data: GraphDataset, feats: FeatureMatrix, split: Split, seed: int) -> FitInfo:
         """Train on ``split.train``, early-stopping on validation PR-AUC; test never touched."""
@@ -176,6 +168,7 @@ class SAGEEdgeModel:
 
         # Preprocessing is fitted on train rows only; val and test never shape it (PR-E1).
         train_x = feats.values[train_idx].astype(np.float64)
+        # ponytail: z-score only, as in sage.py; decide on log1p before the AMLworld run (D2)
         std = train_x.std(axis=0)
         std[std == 0] = 1.0
         self._scale = (train_x.mean(axis=0), std)
@@ -257,32 +250,22 @@ class SAGEEdgeModel:
             extra={"trial0_source": TRIAL0_SOURCE, "params": dict(self.params)},
         )
 
-    def _infer(
-        self, data: GraphDataset, feats: FeatureMatrix, idx: np.ndarray, embeddings: bool = False
-    ) -> np.ndarray:
+    def _infer(self, data: GraphDataset, feats: FeatureMatrix, idx: np.ndarray) -> np.ndarray:
         """Mini-batched eval-mode pass over ``idx``, in ``idx`` order."""
         import torch
 
         assert self._net is not None
         self._net.eval()
-        out: np.ndarray | None = None
+        out = np.empty(idx.size, dtype=np.float32)
         with torch.no_grad():
             for batch in self._loader(data, idx, labels=False, shuffle=False):
-                value = self._forward(batch, feats, idx, embeddings)
-                if not embeddings:
-                    value = torch.sigmoid(value)
-                value = value.detach().cpu().numpy().astype(np.float32)
-                if out is None:
-                    out = np.empty((idx.size, *value.shape[1:]), dtype=np.float32)
-                out[batch.input_id.numpy()] = value
-        assert out is not None, "idx must not be empty"
+                value = torch.sigmoid(self._forward(batch, feats, idx))
+                out[batch.input_id.numpy()] = value.detach().cpu().numpy()
         return out
 
     def _require_fitted(self) -> None:
         if self._net is None:
-            raise RuntimeError(
-                "sage-edge model is not fitted; call fit() before predict_proba/embed"
-            )
+            raise RuntimeError("sage-edge model is not fitted; call fit() before predict_proba")
 
     def predict_proba(
         self, data: GraphDataset, feats: FeatureMatrix, idx: np.ndarray
@@ -291,24 +274,6 @@ class SAGEEdgeModel:
         self._require_fitted()
         self._prepare(data, feats)
         return self._infer(data, feats, np.asarray(idx, dtype=np.int64))
-
-    def embed(self, data: GraphDataset, feats: FeatureMatrix, idx: np.ndarray) -> np.ndarray:
-        """Head activations before the output layer, for the edges ``idx``."""
-        self._require_fitted()
-        self._prepare(data, feats)
-        return self._infer(data, feats, np.asarray(idx, dtype=np.int64), embeddings=True)
-
-    def save(self, path: Path) -> Path:
-        """Write the fitted weights under ``path``; returns the file written."""
-        import torch
-
-        self._require_fitted()
-        assert self._net is not None
-        path = Path(path)
-        path.mkdir(parents=True, exist_ok=True)
-        target = path / "model.pt"
-        torch.save({k: v.detach().cpu() for k, v in self._net.state_dict().items()}, target)
-        return target
 
     @classmethod
     def trial0(cls) -> tuple[dict[str, Any], str]:

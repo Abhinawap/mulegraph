@@ -11,7 +11,6 @@ dataset:
   version: "2023.1"
 
 features:
-  backend: gfp                      # igraph fallback retired in week-1 gate 1
   families: [fan, degree, scatter_gather, lc_cycle]
   bins: [2, 4, 8, 16, 32]
   window: 1                         # one timestep; Elliptic timesteps are disconnected
@@ -41,14 +40,10 @@ models:
   - {name: sage, features: base_gfp, sampler: {kind: neighbor, fanout: [15, 10]}}
   - {name: xgb,  features: raw165}        # published block, incl. 72 one-hop aggregates
 
-search:
-  enabled: false                    # v1a; W is set by week-one gate 5
-
 seeds: [0, 1, 2, 3, 4]
 
 eval:
   metrics: [f1, pr_auc, roc_auc, p_at_r50, p_at_r80]
-  seed_ci: t95
 
 mlflow:
   experiment: elliptic_mvp

@@ -22,7 +22,7 @@ mulegraph/
   data/             # elliptic.py (node task), amlworld.py (edge task), synthetic.py -> GraphDataset
   features/         # Causal graph features via snapml GFP; node_agg_v1 fold on node tasks
   splits/           # random | temporal on batch_id + leakage assertions
-  models/           # xgb, sage behind one fit/predict_proba/embed protocol
+  models/           # xgb, sage behind one fit/predict_proba protocol
   eval/             # Thresholding, metrics, seed t-intervals, curves.py (per-timestep)
   drift/            # detectors.py (PSI, KS, confidence shift), monitor.py (batch scores, lead time)
   report/           # tables.py (MLflow -> CSV), figures.py (curves, drift PNG)

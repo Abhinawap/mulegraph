@@ -366,7 +366,7 @@ def run_drift(cfg: DriftRunConfig, config_path: Path) -> Path:
 
 
 def run_smoke(keep: bool = False) -> Path:
-    """End-to-end run on a synthetic graph, under two minutes on CPU."""
+    """End-to-end run on a synthetic graph, about 10 s."""
     if not SMOKE_CONFIG.is_file():
         raise FileNotFoundError(
             f"smoke config not found at {SMOKE_CONFIG}; `mulegraph smoke` runs from a checkout "

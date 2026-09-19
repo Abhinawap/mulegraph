@@ -91,7 +91,7 @@ Every component depends only on the shared types in `mulegraph/types.py` (`Graph
 | Loaders | `data/` | Read raw files, build a `GraphDataset` with timestamps preserved, cache it | Dataset name, version | `GraphDataset` |
 | Feature builder | `features/` | Causal graph features via GFP, driven forward in time; version them | `GraphDataset`, feature config | `FeatureMatrix` with `feature_version` |
 | Split builder | `splits/` | Random / temporal index sets on `batch_id`; leakage checks | `GraphDataset`, regime config | `Split` with `split_hash` |
-| Models | `models/` | Train and score behind one `fit / predict_proba / embed` protocol | `GraphDataset`, `FeatureMatrix`, `Split`, seed | scores |
+| Models | `models/` | Train and score behind one `fit / predict_proba` protocol | `GraphDataset`, `FeatureMatrix`, `Split`, seed | scores |
 | Evaluator | `eval/` | Threshold on validation, metrics, seed t-intervals, per-timestep curves | `Predictions` | metric records, curves |
 | Drift monitor | `drift/` | PSI / KS / confidence shift per batch with no labels; lead time | features, scores, `batch_id` | scores, flags, lead-time table |
 | Reporter | `report/` | Aggregate MLflow child runs over seeds; figures | parent run id | files under `report/` |
@@ -109,8 +109,8 @@ Every component depends only on the shared types in `mulegraph/types.py` (`Graph
 
 1. One temporal regime only (validated). Same load, features and split as above.
 2. Each model × seed is fitted exactly as in the benchmark. The model then scores **every unit** whose `batch_id` falls in the validation or test window, labelled or not.
-3. Detectors compare each post-reference batch to the validation batches: PSI per feature column (score = max; flag ≥ 0.2), two-sample KS per column (score = fraction with p < 0.01; flag > 0.2), and KS on the model's own scores (flag p < 0.01). They receive feature values and scores only.
-4. Lead time = (first test batch starting a `drop_run`-long stretch where F1 is more than 20% below the validation mean) − (first batch starting a `drop_run`-long run of flags), per detector. The drop and the flag need the same persistence, so a one-batch flag is not a warning. Labels enter only here, in the evaluation of the detector.
+3. Detectors compare each post-reference batch to the validation batches: PSI per feature column (score = max; flag > 0.2), two-sample KS per column (score = fraction with p < 0.01; flag > 0.2), and the KS statistic on the model's own scores (flag > 0.1). With `calibrate`, each fixed flag is replaced by the detector's largest leave-one-out score inside the reference window. They receive feature values and scores only.
+4. Lead time = (first test batch starting a `drop_run`-long stretch where F1 is more than 20% below the validation mean) − (first batch starting a `drop_run`-long run of flags), per detector. The drop and the flag need the same persistence, so a one-batch flag is not a warning. Labels enter only here, in the evaluation of the detector. The validation mean is F1 at the threshold chosen on that same window, so it is optimistic and the drop level sits correspondingly high; this can make an F1 drop register earlier than it would against an out-of-sample reference.
 5. Outputs: `report/tables/<experiment>_scores.csv`, `<experiment>_lead_time.csv`, `report/figures/<experiment>_drift.png`, all logged as artifacts.
 
 ### 3.5 Storage and schemas
@@ -154,7 +154,6 @@ data/
 class BaseModel(Protocol):
     def fit(self, data: GraphDataset, feats: FeatureMatrix, split: Split, seed: int) -> FitInfo: ...
     def predict_proba(self, data: GraphDataset, feats: FeatureMatrix, idx: np.ndarray) -> np.ndarray: ...
-    def embed(self, data: GraphDataset, feats: FeatureMatrix, idx: np.ndarray) -> np.ndarray | None: ...
 ```
 
 Detectors are plain functions over `(reference, current)` arrays: `psi`, `ks_frac`, `conf_shift`. None has a label parameter, and a test asserts it.

@@ -14,7 +14,6 @@ import pytest
 
 from mulegraph.config import FeaturesConfig
 from mulegraph.features.aggregate import empty_node_features, node_agg_v1, node_columns
-from mulegraph.features.builder import build_features
 from mulegraph.features.gfp import (
     RAW_WIDTH,
     VERTEX_STAT_NAMES,
@@ -258,14 +257,3 @@ def test_step_rejects_a_batch_spanning_two_timesteps(features_cfg: FeaturesConfi
 def test_driver_exposes_no_way_to_insert_without_scoring() -> None:
     assert not hasattr(GfpDriver, "fit")
     assert not hasattr(GfpDriver, "partial_fit")
-
-
-# --------------------------------------------------------------------------- #
-# Backend selection
-# --------------------------------------------------------------------------- #
-
-
-def test_igraph_backend_is_retired(tmp_path, synthetic_ds, features_cfg: FeaturesConfig) -> None:
-    cfg = features_cfg.model_copy(update={"backend": "igraph"})
-    with pytest.raises(NotImplementedError, match="week-1 gate 1"):
-        build_features(synthetic_ds, cfg, tmp_path)

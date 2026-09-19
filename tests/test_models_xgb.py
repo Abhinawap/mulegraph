@@ -7,8 +7,6 @@ test that depends on them would be testing three components at once.
 
 from __future__ import annotations
 
-from pathlib import Path
-
 import numpy as np
 import pytest
 
@@ -85,28 +83,6 @@ def test_planted_signal_is_learnable(fitted: Fitted) -> None:
     assert metrics["roc_auc"] > 0.75
 
 
-def test_embed_is_none(fitted: Fitted) -> None:
-    model, data, feats, split, _ = fitted
-    assert model.embed(data, feats, split.test) is None
-
-
-def test_save_writes_a_loadable_model(fitted: Fitted, tmp_path: Path) -> None:
-    model, data, feats, split, _ = fitted
-    path = model.save(tmp_path / "artifact")
-    assert path.is_file() and path.name == "model.json" and path.stat().st_size > 0
-
-    from xgboost import XGBClassifier
-
-    reloaded = XGBClassifier()
-    reloaded.load_model(path)
-    np.testing.assert_allclose(
-        reloaded.predict_proba(feats.values[split.test])[:, 1],
-        model.predict_proba(data, feats, split.test),
-        rtol=1e-5,
-        atol=1e-6,
-    )
-
-
 def test_same_seed_is_deterministic(synthetic_ds: GraphDataset) -> None:
     feats, split = make_feats(synthetic_ds), make_split(synthetic_ds)
     runs = []
@@ -140,13 +116,11 @@ def test_fit_rejects_an_unlabelled_node_in_train(synthetic_ds: GraphDataset) -> 
         model.fit(synthetic_ds, feats, leaky, seed=0)
 
 
-def test_predict_before_fit_is_an_error(synthetic_ds: GraphDataset, tmp_path: Path) -> None:
+def test_predict_before_fit_is_an_error(synthetic_ds: GraphDataset) -> None:
     feats, split = make_feats(synthetic_ds), make_split(synthetic_ds)
     model = XGBModel(params=FAST_PARAMS, device="cpu")
     with pytest.raises(RuntimeError, match="before fit"):
         model.predict_proba(synthetic_ds, feats, split.test)
-    with pytest.raises(RuntimeError, match="before fit"):
-        model.save(tmp_path / "artifact")
 
 
 def test_registry_constructor_signature_matches(synthetic_ds: GraphDataset) -> None:

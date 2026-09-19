@@ -16,7 +16,6 @@ dataset:
   version: "2023.1"
 
 features:
-  backend: gfp
   families: [fan, degree, scatter_gather, lc_cycle]
   bins: [2, 4, 8, 16, 32]
   window: 1
