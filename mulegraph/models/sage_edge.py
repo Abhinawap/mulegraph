@@ -259,8 +259,8 @@ class SAGEEdgeModel:
         out = np.empty(idx.size, dtype=np.float32)
         with torch.no_grad():
             for batch in self._loader(data, idx, labels=False, shuffle=False):
-                value = torch.sigmoid(self._forward(batch, feats, idx))
-                out[batch.input_id.numpy()] = value.detach().cpu().numpy()
+                ids = batch.input_id.numpy()  # before _forward: PyG's batch.to() moves in place
+                out[ids] = torch.sigmoid(self._forward(batch, feats, idx)).cpu().numpy()
         return out
 
     def _require_fitted(self) -> None:

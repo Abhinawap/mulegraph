@@ -6,6 +6,11 @@ Project history, newest first. Add a dated entry for every tag and every change 
 
 ## Unreleased
 
+### 19 Sep 2026 — First Kaggle attempt: a CUDA-only bug in the SAGE edge head
+- **Fixed** `SAGEEdgeModel._infer` read `batch.input_id` after `_forward` had moved the batch to the GPU in place (PyG's `batch.to()`), so edge SAGE failed at its first validation pass on CUDA. CPU hides it: `.to("cpu")` is a no-op. The edge-SAGE fixture now also runs on CUDA when one is present (skipped in CI).
+- **Changed** the Kaggle recipe: `MPLBACKEND=Agg` (Kaggle's inline backend is not in the uv env), the dataset CSV is found under `/kaggle/input` rather than assumed at one mount path, and grep is line-buffered so progress streams.
+- The Kaggle XGBoost fits matched the laptop's to four decimals of val PR-AUC; GFP took 846 s there.
+
 ### 19 Sep 2026 — AMLworld XGBoost rows from a clean commit
 - **Added** `configs/amlworld_xgb.yaml` (`2546822`; NFR-1), the XGBoost half of `amlworld_hi_small.yaml`, so the committed `amlworld_xgb_*` tables have a committed config.
 - **Reran** it from a clean tree at `2546822`: every value in the results table, curves and figure is identical to the `7c22e3e-dirty` run; only the `commit` stamp changed. Methods §12.3, status.
