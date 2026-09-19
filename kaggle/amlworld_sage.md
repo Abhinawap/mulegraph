@@ -24,9 +24,11 @@ which the uv environment does not have:
 ```bash
 %%bash
 cd /kaggle/working/mulegraph
+src=$(find /kaggle/input -name HI-Small_Trans.csv | head -1)   # mount path varies by notebook
+[ -n "$src" ] || { echo "HI-Small_Trans.csv not under /kaggle/input: add the dataset in Input"; exit 1; }
+echo "using $src"
 mkdir -p data/raw/amlworld/hi_small
-ln -sf /kaggle/input/ibm-transactions-for-anti-money-laundering-aml/HI-Small_Trans.csv \
-       data/raw/amlworld/hi_small/HI-Small_Trans.csv
+ln -sf "$src" data/raw/amlworld/hi_small/HI-Small_Trans.csv
 MPLBACKEND=Agg uv run mulegraph run --config configs/amlworld_hi_small.yaml 2>&1 | grep -v "gfp t="
 ```
 
