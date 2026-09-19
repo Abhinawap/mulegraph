@@ -46,3 +46,9 @@ coverage.xml
 # uv
 .venv/
 .claude/worktrees/
+
+# graphify knowledge graph (local, regenerable)
+graphify-out/
+
+# Personal Claude Code settings (machine-specific hook paths)
+.claude/settings.local.json
