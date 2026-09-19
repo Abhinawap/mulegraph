@@ -6,6 +6,10 @@ Project history, newest first. Add a dated entry for every tag and every change 
 
 ## Unreleased
 
+### 19 Sep 2026 — AMLworld XGBoost rows from a clean commit
+- **Added** `configs/amlworld_xgb.yaml` (`2546822`; NFR-1), the XGBoost half of `amlworld_hi_small.yaml`, so the committed `amlworld_xgb_*` tables have a committed config.
+- **Reran** it from a clean tree at `2546822`: every value in the results table, curves and figure is identical to the `7c22e3e-dirty` run; only the `commit` stamp changed. Methods §12.3, status.
+
 ### 19 Sep 2026 — Rolling refit, the alert-rate detector, and a PSI fix
 - **Added** the `temporal_rolling` regime (`34db885`; PR-E7). The temporal window slides forward one batch per test batch; each step is an ordinary temporal split through the same builder, leakage assertions and cache, thresholds on its own validation window (PR-E4) and scores one test batch. The step test sets are stitched into one MLflow child run per (model, seed) with a per-row threshold, so `n_seeds` counts seeds, not refits. Rank metrics are not logged for a rolling run (twelve models do not share a score scale); per-batch PR-AUC is in the curve, and each step's threshold, val_f1, val_pr_auc and best_iteration are logged at `step=t`. `configs/elliptic_rolling.yaml` runs fixed vs rolling on the two-by-two (260 fits). Design §1 narrows the out-of-scope line from "retraining-policy simulation" to policies beyond this one zero-lag refit.
 - **Added** the alert-rate detector (`ea5ecce`; PR-R1): the absolute log ratio of the share of scored units at or above the validation-chosen threshold against the reference share. It sees scores and the threshold only (PR-R2); `score_batches` takes `threshold` and `alert_flag`. `configs/elliptic_drift.yaml` runs it.

@@ -220,7 +220,8 @@ uv run mulegraph smoke                                            # 10 s, synthe
 uv run mulegraph run   --config configs/elliptic_mvp.yaml         # 50 fits, ~9 min on an RTX 4060
 uv run mulegraph drift --config configs/elliptic_drift.yaml       # the headline figure, ~3.5 min
 uv run mulegraph run   --config configs/elliptic_rolling.yaml     # fixed vs rolling refit, ~35 min
-uv run mulegraph run   --config configs/amlworld_hi_small.yaml    # see below
+uv run mulegraph run   --config configs/amlworld_xgb.yaml         # AMLworld XGBoost rows, ~8 min
+uv run mulegraph run   --config configs/amlworld_hi_small.yaml    # full grid with SAGE, see below
 uv run mlflow ui --backend-store-uri sqlite:///mlruns/mlflow.db
 ```
 

@@ -375,16 +375,16 @@ The random split inflates F1 by 0.18 to 0.34 over the temporal split for every c
 
 The GFP result is coherent with the field: on Elliptic the timestep components are disconnected, so a one-timestep GFP window has little to see, and Maganti (2026) finds the real edges carry less signal than shuffled ones under shift. On AMLworld, where GFP is IBM's own headline, the same two-by-two shows whether that reverses.
 
-### 12.3 AMLworld HI-Small (`7c22e3e-dirty`)
+### 12.3 AMLworld HI-Small (`2546822`)
 
-Temporal split, days 0–5 / 6–7 / 8–17 (§9.1), three seeds, from `report/tables/amlworld_xgb_results.csv`. XGBoost is deterministic, so the intervals are zero (§8.3).
+Temporal split, days 0–5 / 6–7 / 8–17 (§9.1), three seeds, from `report/tables/amlworld_xgb_results.csv` (`configs/amlworld_xgb.yaml`). XGBoost is deterministic, so the intervals are zero (§8.3).
 
 | Config | F1 | PR-AUC | P@R0.5 | P@R0.8 |
 |---|---|---|---|---|
 | `xgb.base` | 0.209 | 0.109 | 0.090 | 0.034 |
 | `xgb.base_gfp` | 0.539 | 0.521 | 0.570 | 0.099 |
 
-On AMLworld the GFP features more than double F1, the reverse of Elliptic. The test window reaches into the post-day-10 laundering tail (§9.1), so the per-day curve (`report/tables/amlworld_xgb_curves.csv`) matters here as it does on Elliptic: on the two realistic test days (8–9) GFP takes F1 from 0.10–0.20 to 0.38–0.45, and from day 10 every config scores PR-AUC above 0.92. The SAGE rows need the Kaggle run in `kaggle/amlworld_sage.md`. The run was made from a working tree with uncommitted changes, and its `-dirty` stamp (§10.2) says so; it is rerun from a clean commit before these numbers are tagged.
+On AMLworld the GFP features more than double F1, the reverse of Elliptic. The test window reaches into the post-day-10 laundering tail (§9.1), so the per-day curve (`report/tables/amlworld_xgb_curves.csv`) matters here as it does on Elliptic: on the two realistic test days (8–9) GFP takes F1 from 0.10–0.20 to 0.38–0.45, and from day 10 every config scores PR-AUC above 0.92. The SAGE rows need the Kaggle run in `kaggle/amlworld_sage.md`. A first run was stamped `7c22e3e-dirty` (§10.2); the clean rerun at `2546822` reproduced it exactly.
 
 ### 12.4 Drift monitor on the t43 shutdown (`7a19cb9`)
 

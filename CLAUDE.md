@@ -96,7 +96,8 @@ uv run mulegraph --help
 
 # Benchmark
 uv run mulegraph run --config configs/elliptic_mvp.yaml
-uv run mulegraph run --config configs/amlworld_hi_small.yaml
+uv run mulegraph run --config configs/amlworld_xgb.yaml       # XGBoost rows only, laptop
+uv run mulegraph run --config configs/amlworld_hi_small.yaml  # full grid with SAGE, Kaggle
 uv run mulegraph run --config configs/elliptic_rolling.yaml   # fixed vs rolling refit, ~35 min
 uv run mulegraph drift --config configs/elliptic_drift.yaml
 uv run mulegraph smoke                     # ~10 s, synthetic graph, used in CI
