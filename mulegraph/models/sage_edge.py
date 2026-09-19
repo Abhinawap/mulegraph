@@ -176,6 +176,7 @@ class SAGEEdgeModel:
 
         # Preprocessing is fitted on train rows only; val and test never shape it (PR-E1).
         train_x = feats.values[train_idx].astype(np.float64)
+        # ponytail: z-score only, as in sage.py; decide on log1p before the AMLworld run (D2)
         std = train_x.std(axis=0)
         std[std == 0] = 1.0
         self._scale = (train_x.mean(axis=0), std)
