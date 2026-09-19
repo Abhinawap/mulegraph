@@ -138,13 +138,13 @@ def test_temporal_inductive_rejected_without_cross_time_edges(
     assert synthetic_ds.meta.dataset in message
 
 
-def test_temporal_inductive_is_v1b_where_it_is_defined(
+def test_temporal_inductive_is_refused_where_it_is_defined(
     synthetic_cross_time_ds: GraphDataset, tmp_path: Path
 ) -> None:
     cfg = RegimeConfig(regime="temporal_inductive", train_end=6, val=(7, 9), test=(10, 12))
     assert synthetic_cross_time_ds.meta.cross_time_edges is True
 
-    with pytest.raises(NotImplementedError, match="v1b"):
+    with pytest.raises(RegimeNotSupportedError, match="not built"):
         build_split(synthetic_cross_time_ds, cfg, tmp_path)
 
 

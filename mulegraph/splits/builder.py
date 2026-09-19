@@ -157,7 +157,10 @@ def build_split(data: GraphDataset, cfg: RegimeConfig, cache_dir: Path) -> Split
                 "is False, so its temporal split is already inductive by construction and a "
                 "separate inductive regime is undefined (D1)."
             )
-        raise NotImplementedError("temporal_inductive is v1b (AMLworld)")
+        raise RegimeNotSupportedError(
+            f"temporal_inductive is not built for {data.meta.dataset}: meta.cross_time_edges is "
+            "True, and no split that removes test units from the training graph exists yet."
+        )
 
     if cfg.regime == "random":
         train, val, test = _random_split(data, cfg)

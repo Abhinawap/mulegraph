@@ -24,9 +24,9 @@ dependencies = [
     "torch==2.14.0",
     "torch-geometric==2.8.0.post1",
     "pyg-lib==0.9.0+pt214cu130",
-    # Graph features (week-1 gate 1: GFP is the backend, no igraph fallback)
+    # Graph features
     "snapml==1.17.2",
-    # Tracking (optuna returns with v1a search)
+    # Tracking
     "mlflow==3.16.0",
     "matplotlib==3.11.1",
 ]

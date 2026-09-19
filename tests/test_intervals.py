@@ -55,7 +55,7 @@ def test_wider_confidence_gives_a_wider_interval() -> None:
 
 
 def test_three_seeds_hand_computed() -> None:
-    # The reference GNN runs 3 seeds (v1b), so the n = 3 case is real.
+    # AMLworld runs seeds [0, 1, 2], so the n = 3 case is real.
     # values = [0.4, 0.5, 0.6]: mean 0.5, sd = sqrt(0.02/2 * ... ) by hand:
     #   deviations -0.1, 0, 0.1 -> sum sq 0.02; var(ddof=1) = 0.01; sd = 0.1
     #   t.ppf(0.975, df=2) = 4.3026527

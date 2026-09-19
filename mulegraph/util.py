@@ -132,7 +132,7 @@ def resolve_device(requested: str = "auto") -> str:
 
 
 class Timer:
-    """Wall-clock timer; fit durations feed the W budget arithmetic (D2)."""
+    """Wall-clock timer; fit durations are logged as ``fit_seconds`` (D2)."""
 
     def __init__(self) -> None:
         self.seconds: float = 0.0

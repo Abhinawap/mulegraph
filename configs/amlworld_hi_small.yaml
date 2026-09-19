@@ -10,7 +10,6 @@ dataset:
   version: hi_small
 
 features:
-  backend: gfp
   families: [fan, degree, scatter_gather]   # lc_cycle only once an hour batch is timed fast
   bins: [2, 4, 8, 16, 32]
   window: 24                                # hours; edge_time is the hour index
@@ -38,14 +37,10 @@ models:
     sampler: {kind: neighbor, fanout: [15, 10], batch_size: 4096}
     params: {epochs: 10, patience: 3}
 
-search:
-  enabled: false
-
 seeds: [0, 1, 2]
 
 eval:
   metrics: [f1, pr_auc, roc_auc, p_at_r50, p_at_r80]
-  seed_ci: t95
 
 mlflow:
   experiment: amlworld_hi_small

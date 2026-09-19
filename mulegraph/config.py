@@ -55,7 +55,6 @@ class DatasetConfig(Strict):
 
 
 class FeaturesConfig(Strict):
-    backend: Literal["gfp", "igraph"] = "gfp"
     families: list[GfpFamily] = Field(
         default_factory=lambda: ["fan", "degree", "scatter_gather", "lc_cycle"]
     )
@@ -91,7 +90,7 @@ class RegimeConfig(Strict):
     val: tuple[int, int] | None = None
     test: tuple[int, int] | None = None
     fractions: tuple[float, float, float] = (0.7, 0.15, 0.15)
-    #: Seeds the random partition only; model seeds refit on the same partition (spec 2.5).
+    #: Seeds the random partition only; every model seed refits on this same partition.
     seed: int = 0
 
     @model_validator(mode="after")
@@ -138,7 +137,7 @@ class SamplerConfig(Strict):
 
 
 class ModelConfig(Strict):
-    name: Literal["xgb", "sage", "pna"]
+    name: Literal["xgb", "sage"]
     features: FeatureSelection
     sampler: SamplerConfig | None = None
     #: Overrides on top of the model's fixed reference (trial-0) configuration.
@@ -162,26 +161,10 @@ class ModelConfig(Strict):
         return f"{self.name}.{self.features}"
 
 
-class SearchConfig(Strict):
-    """Hyperparameter search (D2, PR-M6) is v1a; the MVP fits trial 0 only."""
-
-    enabled: bool = False
-
-    @model_validator(mode="after")
-    def _mvp_guard(self) -> SearchConfig:
-        if self.enabled:
-            raise ValueError(
-                "search.enabled is v1a: the wall-clock cap W is set by week-one gate 5 and "
-                "must be identical for every model (D2), so no search runs in the MVP"
-            )
-        return self
-
-
 class EvalConfig(Strict):
     metrics: list[MetricName] = Field(
         default_factory=lambda: ["f1", "pr_auc", "roc_auc", "p_at_r50", "p_at_r80"]
     )
-    seed_ci: Literal["t95"] = "t95"
 
 
 class MLflowConfig(Strict):
@@ -201,7 +184,6 @@ class RunConfig(Strict):
     features: FeaturesConfig = Field(default_factory=FeaturesConfig)
     split: SplitConfig
     models: list[ModelConfig] = Field(min_length=1)
-    search: SearchConfig = Field(default_factory=SearchConfig)
     seeds: list[int] = Field(default_factory=lambda: [0, 1, 2, 3, 4], min_length=1)
     eval: EvalConfig = Field(default_factory=EvalConfig)
     mlflow: MLflowConfig
@@ -258,7 +240,7 @@ class DriftRunConfig(RunConfig):
 
 
 def load_config(path: str | Path, cls: type[RunConfig] = RunConfig) -> RunConfig:
-    """Read and validate a YAML config; ``MULEGRAPH_FEATURE_BACKEND``/``_DEVICE`` override it."""
+    """Read and validate a YAML config; ``MULEGRAPH_DEVICE`` overrides ``device``."""
     path = Path(path)
     if not path.is_file():
         raise FileNotFoundError(f"Config not found: {path}")
@@ -266,10 +248,6 @@ def load_config(path: str | Path, cls: type[RunConfig] = RunConfig) -> RunConfig
     if not isinstance(raw, dict):
         raise ValueError(f"Config must be a YAML mapping, got {type(raw).__name__}: {path}")
 
-    backend = os.environ.get("MULEGRAPH_FEATURE_BACKEND")
-    if backend:
-        raw.setdefault("features", {})["backend"] = backend
-        log.info("MULEGRAPH_FEATURE_BACKEND=%s overrides features.backend", backend)
     device = os.environ.get("MULEGRAPH_DEVICE")
     if device:
         raw["device"] = device

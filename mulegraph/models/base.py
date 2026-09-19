@@ -13,7 +13,7 @@ from mulegraph.types import FeatureMatrix, GraphDataset, Split
 
 @dataclass
 class FitInfo:
-    """Cost and validation score of one fit; ``seconds`` feeds the W budget (D2)."""
+    """Cost and validation score of one fit; ``seconds`` is logged as ``fit_seconds`` (D2)."""
 
     seconds: float
     best_iteration: int | None = None

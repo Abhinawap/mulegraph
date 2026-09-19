@@ -198,7 +198,7 @@ class Predictions:
     idx: np.ndarray  # int64 [n]; node indices scored
     proba: np.ndarray  # float32 [n]; P(illicit)
     y: np.ndarray  # int64 [n]
-    time: np.ndarray  # int64 [n]; for per-timestep curves (v1a)
+    time: np.ndarray  # int64 [n]; for per-timestep curves (PR-E5)
     embeddings: np.ndarray | None = None  # float32 [n, D] for GNNs
 
     def __post_init__(self) -> None:

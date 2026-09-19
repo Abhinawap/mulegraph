@@ -167,7 +167,7 @@ class SAGEModel:
 
         train_idx = np.asarray(split.train, dtype=np.int64)
         # Preprocessing is fitted on train rows only; val and test never shape it (PR-E1).
-        # ponytail: z-score only; log1p for heavy-tailed GFP counts if v1a search shows it matters
+        # ponytail: z-score only; log1p for heavy-tailed GFP counts if a search shows it matters
         train_x = feats.values[train_idx].astype(np.float64)
         std = train_x.std(axis=0)
         std[std == 0] = 1.0  # a column constant on train maps to zero, not NaN

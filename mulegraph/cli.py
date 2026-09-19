@@ -25,10 +25,10 @@ ConfigOption = Annotated[
 ]
 
 
-def _fail(message: str, code: int = 1) -> None:
+def _fail(message: str) -> None:
     """Print a one-sentence reason without a traceback, then exit."""
     typer.secho(message, fg=typer.colors.RED, err=True)
-    raise typer.Exit(code)
+    raise typer.Exit(1)
 
 
 @app.callback()
@@ -59,8 +59,6 @@ def run(config: ConfigOption) -> None:
         table = run_benchmark(cfg, config)
     except (RegimeNotSupportedError, FileNotFoundError) as exc:
         _fail(str(exc))
-    except NotImplementedError as exc:
-        _fail(str(exc), code=2)
 
     typer.secho(f"results table: {table}", fg=typer.colors.GREEN)
 
@@ -69,7 +67,7 @@ def run(config: ConfigOption) -> None:
 def smoke(
     keep: Annotated[bool, typer.Option("--keep", help="Keep the temporary run directory.")] = False,
 ) -> None:
-    """End-to-end check on a synthetic graph, under two minutes on CPU. Used in CI."""
+    """End-to-end check on a synthetic graph, about 10 s. Used in CI."""
     from mulegraph.pipeline import run_smoke
 
     table = run_smoke(keep=keep)

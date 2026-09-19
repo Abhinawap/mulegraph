@@ -12,7 +12,6 @@ dataset:
     seed: 0
 
 features:
-  backend: gfp
   families: [fan, degree, scatter_gather, lc_cycle]
   bins: [2, 4, 8]
   window: 1
@@ -34,8 +33,7 @@ models:
   - {name: sage, features: base_gfp, sampler: {kind: full_batch}, params: {epochs: 20, patience: 5}}
   - {name: xgb,  features: raw165,   params: {n_estimators: 50}}
 
-search: {enabled: false}
 seeds: [0, 1]
-eval: {metrics: [f1, pr_auc, roc_auc, p_at_r50, p_at_r80], seed_ci: t95}
+eval: {metrics: [f1, pr_auc, roc_auc, p_at_r50, p_at_r80]}
 mlflow: {experiment: smoke}
 device: cpu
