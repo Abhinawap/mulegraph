@@ -29,7 +29,7 @@ src=$(find /kaggle/input -name HI-Small_Trans.csv | head -1)   # mount path vari
 echo "using $src"
 mkdir -p data/raw/amlworld/hi_small
 ln -sf "$src" data/raw/amlworld/hi_small/HI-Small_Trans.csv
-MPLBACKEND=Agg uv run mulegraph run --config configs/amlworld_hi_small.yaml 2>&1 | grep -v "gfp t="
+MPLBACKEND=Agg uv run mulegraph run --config configs/amlworld_hi_small.yaml 2>&1 | grep --line-buffered -v "gfp t="
 ```
 
 Cell 3 — bundle the outputs for download (Output tab → `amlworld_run.zip`):
