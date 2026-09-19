@@ -382,7 +382,7 @@ Temporal split, days 0–5 / 6–7 / 8–17 (§9.1), three seeds, from `report/t
 
 On AMLworld the GFP features more than double F1, the reverse of Elliptic. The test window reaches into the post-day-10 laundering tail (§9.1), so the per-day curve (`report/tables/amlworld_xgb_curves.csv`) matters here as it does on Elliptic: on the two realistic test days (8–9) GFP takes F1 from 0.10–0.20 to 0.38–0.45, and from day 10 every config scores PR-AUC above 0.92. The SAGE rows need the Kaggle run in `kaggle/amlworld_sage.md`. The run was made from a working tree with uncommitted changes, and its `-dirty` stamp (§10.2) says so; it is rerun from a clean commit before these numbers are tagged.
 
-### 12.4 Drift monitor on the t43 shutdown (`625947c`)
+### 12.4 Drift monitor on the t43 shutdown (`8c28027`)
 
 `mulegraph drift --config configs/elliptic_drift.yaml` fits `xgb.base_gfp` and `sage.base_gfp` on the temporal split, then scores every unit from t35 to t49 with no labels (design §3.4, PR-R2). The reference is the validation window t35–37. Three detectors run per batch: maximum PSI over feature columns, the fraction of feature columns whose KS test rejects at 0.01, and the KS statistic on the model's scores. With textbook flags (PSI > 0.2, KS p < 0.01) every test batch is flagged, because at 2,500–7,000 rows a batch the tests reject almost anything. Each flag is therefore calibrated to the detector's largest leave-one-out score inside the reference window.
 
@@ -397,6 +397,29 @@ A model counts as broken at the first timestep that starts two consecutive batch
 | `sage.base_gfp` | KS on features, KS on scores | never | as above | — |
 
 No detector warns before the collapse. The SAGE drop at t39 is a dip below the drop level that recovers by t42, not the shutdown. Feature detectors see only features, so their flags are identical across models and seeds, and XGBoost's seeds give identical fits: this is one observation of one event (§11). Tables: `report/tables/elliptic_drift_scores.csv`, `report/tables/elliptic_drift_lead_time.csv`.
+
+### 12.5 Why t43 breaks every model and every detector (`8c28027`)
+
+The same drift run, with `drift.event: 43`, splits the labelled test units at t43 (design §3.4 step 5, PR-R5). For each side it records how the fitted model transfers, and it refits a probe: XGBoost with library defaults, 5-fold stratified CV inside that window alone. From `report/tables/elliptic_drift_event.csv`; SAGE is the mean over five seeds with the range in brackets, and XGBoost's seeds are identical.
+
+| | t38–42 | t43–49 |
+|---|---|---|
+| Labelled units (illicit) | 6,436 (659, 10.2%) | 6,687 (169, 2.5%) |
+| `xgb.base_gfp` ROC-AUC | 0.957 | 0.556 |
+| `xgb.base_gfp` recall at the validation threshold | 0.713 | 0.018 |
+| `xgb.base_gfp` median score of illicit units | 0.999 | 0.000 |
+| `sage.base_gfp` ROC-AUC | 0.929 [0.926, 0.937] | 0.681 [0.639, 0.727] |
+| `sage.base_gfp` recall at the validation threshold | 0.595 [0.549, 0.651] | 0.020 [0.012, 0.030] |
+| `sage.base_gfp` median score of illicit units | 0.966 [0.942, 0.986] | 0.058 [0.008, 0.130] |
+| Probe ROC-AUC, refit inside the window | 0.993 | 0.985 |
+
+Three readings follow.
+
+**The models are confidently wrong, not uncertain.** After t43 the median illicit unit scores 0.000 under XGBoost, and ROC-AUC falls to near chance for XGBoost (0.56), so no threshold rescues it: the ranking itself is gone. SAGE keeps slightly more of the ranking but recalls no more.
+
+**The new illicit behaviour is learnable; it is just different.** Refit inside t43–49 alone, the probe separates illicit from licit about as well as it does before the shutdown (0.985 against 0.993). The labels after t43 are consistent; the rule that fits t1–34 no longer applies to them. The benchmark's random split shows the same from the other side: with some post-t43 units in training, its per-timestep F1 recovers to 0.89 and 0.95 at t48–49 for `xgb.base_gfp` (0.74 and 0.85 for SAGE), while every temporal config stays at or below 0.04 (`report/tables/elliptic_mvp_curves.csv`). Those random-split timesteps hold only 5 and 11 illicit test units, so the recovery is indicative. The probe's folds are random within the window, so 0.985 measures separability, not what a deployed model would reach.
+
+**Nothing in the model class can fix this, and nothing label-free sees it.** Every config learns from the same t1–34 illicit pattern. Graph structure cannot supply the new one: Elliptic's timesteps are disconnected, so GFP windows and SAGE neighbourhoods see only the same timestep (§11). Weber et al. (2019) report the same collapse for a random forest retrained after each test step. The detectors, meanwhile, watch whole batches. At t43 the 24 illicit units are under 2% of the 1,370 labelled units and a smaller share of all scored units. From t42 to t43, PSI falls from 1.20 to 0.93 against a flag at 1.52. Feature KS rises from 0.64 to 0.71, which flags t43 alone, above its 0.64 flag, but falls to 0.53 at t44, so the flag does not hold. Score KS for XGBoost falls from 0.094 to 0.084 against a flag at 0.186. Because the model scores the new illicit units as licit, the score distribution loses high scores and looks calmer, not stranger. The change is in which feature patterns are illicit, for a small minority of rows. Marginal-distribution detectors are blind to that by construction, which is why §12.4 is negative for every detector rather than a matter of calibration.
 
 ## 13. Related work and positioning
 
