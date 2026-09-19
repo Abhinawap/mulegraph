@@ -24,10 +24,11 @@ Each edge takes its source node's timestep as `edge_time`. That definition is ca
 
 We model Elliptic++ as a transaction graph: a node is a transaction, an edge is a flow of bitcoin from one transaction's outputs to another's inputs (D1). The 49 timesteps form 49 disconnected components. The Elliptic++ actor (wallet) graph, where entities do persist across time, is out of scope.
 
-This graph structure fixes how many evaluation regimes Elliptic can support. Three regimes are defined (PR-E1):
+This graph structure fixes how many evaluation regimes Elliptic can support. Four regimes are defined (PR-E1, PR-E7):
 
 - **random**: a stratified partition of labelled nodes, ignoring time. Training and test nodes share timestep components, so a GNN aggregates test nodes' features (never their labels) during training. The regime is transductive and leaks the future; we run it to measure what a random split inflates.
-- **temporal**: train on earlier timesteps, validate and test on later ones.
+- **temporal**: train on earlier timesteps, validate and test on later ones. The model is fitted once and never refreshed.
+- **temporal_rolling**: the temporal window slides forward one batch per test batch. For test batch *t* the model is refit on labels up to *t* − 4 and thresholded on *t* − 3 … *t* − 1, so each step is an ordinary temporal fit and the twelve test batches are scored by twelve models. It is the deployment-realistic counterpart of `temporal`: what a model that is always as fresh as its labels allow can do, with zero label lag beyond the validation window (§5).
 - **temporal_inductive**: as temporal, with test nodes removed from the training graph and their features built only from edges that existed at their own time.
 
 On Elliptic the temporal split is already inductive. No edge crosses a timestep, so no test node can appear in any training node's neighbourhood and no training-period edge can reach a test node's features. A separate inductive regime would produce the same partition under a different name. The toolkit therefore treats `temporal_inductive` as undefined on Elliptic. `build_split` raises `RegimeNotSupportedError` whenever `meta.cross_time_edges` is False, with the message:
@@ -148,6 +149,8 @@ Both regimes partition labelled nodes only (46,564 on Elliptic).
 
 The random split is two stratified cuts with scikit-learn's `train_test_split`: 70% for training, then the remainder divided evenly between validation and test. The temporal test window spans the dark-market shutdown at t43.
 
+**Rolling refit** (`temporal_rolling`, PR-E7) reuses the temporal bounds as a template. For each test batch *t* from 38 to 49 the whole window shifts by *t* − 38: train ≤ 34 + (*t* − 38), val [35, 37] + (*t* − 38), test [*t*, *t*]. Each step is built by the same temporal builder, passes the same leakage assertions and is cached under its own definition hash, so the regime is twelve temporal splits, each with its own `split_hash`; the child run logs a hash over the twelve. The label lag is the validation window only: at *t* the newest label the model has seen is from *t* − 1, and the newest label it trained on is from *t* − 4. Elliptic timesteps are about two weeks apart, so this is an optimistic bound on what refitting can recover, not a retraining policy.
+
 **Leakage assertions** run on every build (`splits/builder.py`), and a failure stops the run:
 
 - train, validation and test are pairwise disjoint;
@@ -212,7 +215,7 @@ The Elliptic grid ran 50 fits (5 configs × 2 regimes × 5 seeds) in under nine 
 
 `choose_threshold` takes the validation labels and validation scores and nothing else; its signature has no way to receive test data (PR-E4). It builds the precision-recall curve on validation, computes positive-class F1 at every threshold on the curve, and returns the threshold with the highest F1. When several thresholds tie, it returns the highest one: same F1, fewer alerts. A node is predicted illicit when its score is at or above the threshold.
 
-The pipeline scores test once, with that threshold. A unit test spies on `choose_threshold` and asserts that, on every fit, it receives the validation set and nothing else. The validation F1 at the chosen threshold is logged as `val_f1`, a selection diagnostic that makes a validation/test disagreement visible; it never appears in a results table.
+The pipeline scores test once, with that threshold. Under `temporal_rolling` every step chooses its own threshold on its own validation window and scores its one test batch with it; the stitched test set therefore carries one threshold per row, and the pooled F1 is computed from those per-step decisions. The rank metrics (PR-AUC, ROC-AUC, P@R) are not reported for a rolling run: twelve models do not share a score scale, so pooling their scores would rank a 0.6 from one against a 0.6 from another. Per-batch PR-AUC, where one model scores one batch, is in the per-timestep curve. A unit test spies on `choose_threshold` and asserts that, on every fit, it receives the validation set and nothing else. The validation F1 at the chosen threshold is logged as `val_f1`, a selection diagnostic that makes a validation/test disagreement visible; it never appears in a results table.
 
 ### 7.2 Metrics
 

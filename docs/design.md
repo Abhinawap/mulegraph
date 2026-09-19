@@ -30,7 +30,7 @@ A data scientist on a bank or payment firm's financial-crime team who has a tran
 
 ### Deliberately out of scope
 
-Real bank data. Retraining-policy simulation under label lag. Injected typology-shift events. PNA / GIN+EU via IBM's Multi-GNN code (its published configuration needs more than 8 GB of GPU memory; see [project_status.md](project_status.md)). The `temporal_inductive` regime. Transfer learning across datasets. Dashboards, web UI, cloud deployment. LLM components. Oversampling on graphs. Random-split-only results, or accuracy as a headline metric. Any claim that synthetic results generalise to real transactions.
+Real bank data. Retraining policies beyond one rolling refit with zero label lag (`temporal_rolling`, PR-E7). Injected typology-shift events. PNA / GIN+EU via IBM's Multi-GNN code (its published configuration needs more than 8 GB of GPU memory; see [project_status.md](project_status.md)). The `temporal_inductive` regime. Transfer learning across datasets. Dashboards, web UI, cloud deployment. LLM components. Oversampling on graphs. Random-split-only results, or accuracy as a headline metric. Any claim that synthetic results generalise to real transactions.
 
 ---
 
@@ -101,15 +101,15 @@ Every component depends only on the shared types in `mulegraph/types.py` (`Graph
 1. Pydantic validates the config. The orchestrator seeds Python, NumPy, PyTorch, CUDA; opens an MLflow parent run; logs the config, git commit (stamped `-dirty` on an uncommitted tree) and dataset version.
 2. Loader returns a cached `GraphDataset` or builds and caches it.
 3. Feature builder checks the cache for `(dataset_version, feature_version)`; on a miss it computes causal features one batch at a time, forward in time.
-4. Split builder builds indices for each regime, runs the leakage assertions, logs `split_hash`. All splits are built before the first fit so an undefined regime fails in seconds.
-5. For each (regime, model, seed): fit on train with early stopping on validation; choose the threshold on the validation PR curve; score test once; compute metrics and per-timestep curves; log a child run with tags `dataset, dataset_version, regime, model, features, feature_version, split_hash, git_commit` and a `predictions.parquet` artifact.
+4. Split builder builds indices for each regime, runs the leakage assertions, logs `split_hash`. All splits are built before the first fit so an undefined regime fails in seconds. A `temporal_rolling` regime is a list of temporal splits, one per test batch, the whole window shifted forward one batch at a time (PR-E7); every step passes the same assertions.
+5. For each (regime, model, seed): fit on train with early stopping on validation; choose the threshold on the validation PR curve; score test once; compute metrics and per-timestep curves; log a child run with tags `dataset, dataset_version, regime, model, features, feature_version, split_hash, git_commit` and a `predictions.parquet` artifact. Under `temporal_rolling` this repeats per step, each step thresholding on its own validation window, and the step test sets are stitched into one child run per seed so the table's `n_seeds` counts seeds, not refits; `split_hash` is a hash over the step hashes.
 6. Reporter aggregates the children of *this* parent run into `report/tables/<experiment>_results.csv`, `<experiment>_curves.csv` and `report/figures/<experiment>_curves.png`.
 
 ### 3.4 Drift run (`mulegraph drift`)
 
 1. One temporal regime only (validated). Same load, features and split as above.
 2. Each model × seed is fitted exactly as in the benchmark. The model then scores **every unit** whose `batch_id` falls in the validation or test window, labelled or not.
-3. Detectors compare each post-reference batch to the validation batches: PSI per feature column (score = max; flag > 0.2), two-sample KS per column (score = fraction with p < 0.01; flag > 0.2), and the KS statistic on the model's own scores (flag > 0.1). With `calibrate`, each fixed flag is replaced by the detector's largest leave-one-out score inside the reference window. They receive feature values and scores only.
+3. Detectors compare each post-reference batch to the validation batches: PSI per feature column (score = max; flag > 0.2), two-sample KS per column (score = fraction with p < 0.01; flag > 0.2), the KS statistic on the model's own scores (flag > 0.1), and the alert rate: the absolute log ratio of the share of units at or above the validation threshold against the reference share (flag > 0.5). With `calibrate`, each fixed flag is replaced by the detector's largest leave-one-out score inside the reference window. They receive feature values, scores and the validation threshold only.
 4. Lead time = (first test batch starting a `drop_run`-long stretch where F1 is more than 20% below the validation mean) − (first batch starting a `drop_run`-long run of flags), per detector. The drop and the flag need the same persistence, so a one-batch flag is not a warning. Labels enter only here, in the evaluation of the detector. The validation mean is F1 at the threshold chosen on that same window, so it is optimistic and the drop level sits correspondingly high; this can make an F1 drop register earlier than it would against an out-of-sample reference.
 5. With `drift.event` set, the labelled test units are split at that batch. For each side the run records prevalence, the fitted model's ROC-AUC, recall at the validation threshold and median illicit score, plus a probe: 5-fold stratified CV ROC-AUC of XGBoost library defaults refit inside that window alone. A probe near 1 where transfer fails means the event changed what illicit looks like rather than making it unlearnable. The probe's folds are random within the window, so it measures separability, never deployment performance.
 6. Outputs: `report/tables/<experiment>_scores.csv`, `<experiment>_lead_time.csv`, `<experiment>_event.csv` (with `drift.event`), `report/figures/<experiment>_drift.png`, all logged as artifacts.
@@ -205,9 +205,10 @@ Stable ids cited by code, tests and docstrings.
 - **PR-E4.** Threshold chosen on the validation PR curve, never on test.
 - **PR-E5.** Per-timestep metric curves for every model, covering the dark-market shutdown on Elliptic.
 - **PR-E6.** Accuracy is never reported as a headline metric.
+- **PR-E7.** Rolling temporal regime: the temporal window slides forward one batch per test batch; each step fits on its own training window, thresholds on its own validation window (PR-E4) and scores one test batch; the stitched test set is one run per seed. Zero label lag beyond the validation window; it measures what post-shift labels buy, not a retraining policy.
 
 **Drift monitoring**
-- **PR-R1.** Detectors: Population Stability Index and Kolmogorov–Smirnov on input features; prediction-confidence distribution shift.
+- **PR-R1.** Detectors: Population Stability Index and Kolmogorov–Smirnov on input features; prediction-confidence distribution shift; alert rate at the validation threshold.
 - **PR-R2.** Detectors run on batches with no access to labels.
 - **PR-R3.** Output per batch: drift score, threshold flag, and batch id.
 - **PR-R4.** Evaluation: lead time between the first drift flag and the first measured F1 drop beyond a set tolerance, on Elliptic's natural event, reported per detector.
