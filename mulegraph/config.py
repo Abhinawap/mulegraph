@@ -237,7 +237,8 @@ class DriftConfig(Strict):
     conf_flag: float = Field(0.1, gt=0.0, lt=1.0)
     #: Replace the fixed flags with each detector's leave-one-out maximum inside the reference.
     calibrate: bool = False
-    #: Relative F1 fall from the validation mean, sustained for ``drop_run`` batches, = broken.
+    #: Relative F1 fall from the validation mean, sustained for ``drop_run`` batches, = broken;
+    #: a detector warns only after ``drop_run`` consecutive flags.
     f1_drop: float = Field(0.2, gt=0.0, lt=1.0)
     drop_run: int = Field(2, ge=1)
 

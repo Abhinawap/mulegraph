@@ -1,8 +1,8 @@
 # Project Status
 
-**Last updated:** 17 Sep 2026
+**Last updated:** 19 Sep 2026
 **Current milestone:** portfolio v1.0
-**Overall state:** The Elliptic++ benchmark runs end to end on the laptop (50 fits in under nine minutes on an RTX 4060), with per-timestep curves that make the ~t43 dark-market collapse visible and a calibrated label-free drift monitor that gives XGBoost 3–4 timesteps of warning (PSI / KS on features) while the score-shift detector misses the event. AMLworld HI-Small runs as an edge task: XGBoost F1 0.21 → 0.54 with causal GFP features (8 min, 5 GB RSS). The GraphSAGE edge head is built and tested; its AMLworld rows need the Kaggle P100 run in `kaggle/amlworld_sage.md`. The repository is public. The IBM Multi-GNN PNA reference row was dropped: its published configuration needs more than the laptop's 8 GB of GPU memory, and replicating it added nothing to the question.
+**Overall state:** The Elliptic++ benchmark runs end to end on the laptop (50 fits in under nine minutes on an RTX 4060), with per-timestep curves that make the ~t43 dark-market collapse visible and a calibrated label-free drift monitor that gives no warning of the collapse once a flag, like the F1 drop, must hold for two timesteps: PSI first holds at t48 (lead −5), KS and the score-shift detector never hold. The earlier 3–4 timestep lead came from counting single flags. AMLworld HI-Small runs as an edge task: XGBoost F1 0.21 → 0.54 with causal GFP features (8 min, 5 GB RSS). The GraphSAGE edge head is built and tested; its AMLworld rows need the Kaggle P100 run in `kaggle/amlworld_sage.md`. The repository is public. The IBM Multi-GNN PNA reference row was dropped: its published configuration needs more than the laptop's 8 GB of GPU memory, and replicating it added nothing to the question.
 
 ## Still open
 

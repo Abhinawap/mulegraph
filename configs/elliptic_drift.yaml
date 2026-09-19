@@ -7,9 +7,9 @@
 # labels. Thresholds are calibrated on the reference itself: the largest
 # leave-one-out score among t35-37 is the noise floor, because at ~3k nodes per
 # timestep the textbook PSI 0.2 / KS p<0.01 flags every batch. The lead-time
-# table compares each detector's first flag with the first timestep where test
-# F1 stays 20% below the validation mean for two batches (~t43, the dark-market
-# shutdown).
+# table compares the first timestep where each detector flags two batches in a
+# row with the first timestep where test F1 stays 20% below the validation mean
+# for two batches (~t43, the dark-market shutdown).
 
 dataset:
   name: elliptic_pp
