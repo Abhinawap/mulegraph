@@ -1,0 +1,38 @@
+# AMLworld HI-Small, XGBoost rows only: the laptop half of amlworld_hi_small.yaml (PR-D2).
+#
+#   uv run mulegraph run --config configs/amlworld_xgb.yaml     # ~8 min, 5 GB RSS
+#
+# The SAGE rows need the Kaggle run in kaggle/amlworld_sage.md.
+
+dataset:
+  name: amlworld
+  version: hi_small
+
+features:
+  families: [fan, degree, scatter_gather]
+  bins: [2, 4, 8, 16, 32]
+  window: 24
+  cycle_len: 10
+  vertex_stats: true
+  num_threads: 8
+
+split:
+  regimes:
+    - regime: temporal
+      train_end: 5
+      val: [6, 7]
+      test: [8, 17]
+
+models:
+  - {name: xgb, features: base}
+  - {name: xgb, features: base_gfp}
+
+seeds: [0, 1, 2]
+
+eval:
+  metrics: [f1, pr_auc, roc_auc, p_at_r50, p_at_r80]
+
+mlflow:
+  experiment: amlworld_xgb
+
+device: auto

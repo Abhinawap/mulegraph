@@ -12,17 +12,18 @@ import pytest
 
 from mulegraph import pipeline
 from mulegraph.config import DriftRunConfig
-from mulegraph.drift.detectors import conf_shift, ks_frac, psi
+from mulegraph.drift.detectors import alert_shift, conf_shift, ks_frac, psi
 from mulegraph.drift.monitor import lead_time, score_batches
 
 #: DriftConfig's defaults, spelled out: drift/ never imports the config (coupling rule).
 FLAGS = dict(
-    detectors=("psi", "ks", "conf"),
+    detectors=("psi", "ks", "conf", "alert"),
     bins=10,
     psi_flag=0.2,
     ks_alpha=0.01,
     ks_frac_flag=0.2,
     conf_flag=0.1,
+    alert_flag=0.2,
 )
 
 
@@ -45,14 +46,31 @@ def test_detectors_increase_with_shift() -> None:
 
 
 def test_psi_sees_a_shift_away_from_a_constant_reference_column() -> None:
+    # snapml turns on flush-to-zero for the process; the feature builder imports it before
+    # any detector runs, so the detector must work under it regardless of test order.
+    pytest.importorskip("snapml")
     ref = np.zeros((100, 1))
     cur = np.ones((100, 1))
     assert psi(ref, cur)[0] > 0.2
+    binary_ref = np.repeat([[0.0], [1.0]], 50, axis=0)
+    assert psi(binary_ref, np.ones((100, 1)))[0] > 0.2
+
+
+def test_alert_shift_increases_as_scores_cross_threshold() -> None:
+    rng = np.random.default_rng(2)
+    ref = rng.uniform(size=500)
+    shifts = [0.0, 0.2, 0.4, 0.6]
+    scores = [alert_shift(ref, np.clip(ref + s, 0, 1), threshold=0.5) for s in shifts]
+    assert all(a <= b for a, b in zip(scores, scores[1:], strict=False)), scores
+    assert scores[0] == pytest.approx(0.0, abs=1e-6)
+    assert scores[-1] > scores[0]
+    with pytest.raises(ValueError, match="non-empty"):
+        alert_shift(np.array([]), ref, threshold=0.5)
 
 
 def test_no_detector_accepts_labels() -> None:
     """PR-R2: the only way a label could reach a detector is through its signature."""
-    for fn in (psi, ks_frac, conf_shift, score_batches):
+    for fn in (psi, ks_frac, conf_shift, alert_shift, score_batches):
         names = set(inspect.signature(fn).parameters)
         assert not any(n == "y" or "label" in n for n in names), (fn.__name__, names)
 
@@ -110,15 +128,18 @@ def test_calibrated_thresholds_are_the_reference_noise_floor() -> None:
     proba = rng.uniform(size=2000)
     proba[batch == 11] = rng.uniform(0.5, 1.0, size=400)
 
-    table = score_batches(values, proba, batch, [1, 2, 3], calibrate=True, **FLAGS)
+    table = score_batches(values, proba, batch, [1, 2, 3], calibrate=True, threshold=0.5, **FLAGS)
     flagged = table.set_index(["detector", "batch_id"])["flagged"]
     assert not flagged.loc[("psi", 10)] and not flagged.loc[("conf", 10)]
+    assert not flagged.loc[("alert", 10)]
     assert flagged.loc[("psi", 11)] and flagged.loc[("ks", 11)] and flagged.loc[("conf", 11)]
+    assert flagged.loc[("alert", 11)]
     floor = table.groupby("detector")["threshold"].first()
     assert floor["psi"] > 0 and floor["conf"] > 0 and floor["ks"] >= 0
+    assert floor["alert"] >= 0
 
     with pytest.raises(ValueError, match="two populated reference batches"):
-        score_batches(values, proba, batch, [1], calibrate=True, **FLAGS)
+        score_batches(values, proba, batch, [1], calibrate=True, threshold=0.5, **FLAGS)
 
 
 @pytest.fixture
@@ -154,6 +175,29 @@ def test_drift_refuses_anything_but_one_temporal_regime(drift_config: DriftRunCo
         DriftRunConfig.model_validate(raw)
 
 
+def test_event_must_leave_a_test_batch_on_each_side(drift_config: DriftRunConfig) -> None:
+    raw = drift_config.model_dump()
+    for event in (9, 13):
+        raw["drift"]["event"] = event
+        with pytest.raises(ValueError, match="inside the test window"):
+            DriftRunConfig.model_validate(raw)
+
+
+def test_run_drift_with_an_event_writes_before_and_after_rows(
+    drift_config: DriftRunConfig, tmp_path: Path
+) -> None:
+    raw = drift_config.model_dump()
+    raw["drift"]["event"] = 11
+    pipeline.run_drift(DriftRunConfig.model_validate(raw), pipeline.SMOKE_CONFIG)
+
+    table = pd.read_csv(tmp_path / "report" / "tables" / "drift_test_event.csv")
+    assert len(table) == 2 * 2  # windows x seeds
+    assert set(table["window"]) == {"before", "after"}
+    assert table["probe_roc_auc"].between(0, 1).all()
+    # The probe depends on the window and features only, not the seed of the fitted model.
+    assert table.groupby("window")["probe_roc_auc"].nunique().eq(1).all()
+
+
 def test_run_drift_writes_scores_and_lead_time(
     drift_config: DriftRunConfig, tmp_path: Path
 ) -> None:
@@ -162,11 +206,12 @@ def test_run_drift_writes_scores_and_lead_time(
     assert table == tmp_path / "report" / "tables" / "drift_test_lead_time.csv"
     with open(table, newline="") as fh:
         leads = list(csv.DictReader(fh))
-    assert len(leads) == 3 * 2  # detectors x seeds
-    assert {r["detector"] for r in leads} == {"psi", "ks", "conf"}
+    assert len(leads) == 4 * 2  # detectors x seeds
+    assert {r["detector"] for r in leads} == {"psi", "ks", "conf", "alert"}
 
     with open(tmp_path / "report" / "tables" / "drift_test_scores.csv", newline="") as fh:
         scores = list(csv.DictReader(fh))
     assert {r["batch_id"] for r in scores} == {"9", "10", "11", "12"}
-    assert len(scores) == 3 * 4 * 2
+    assert len(scores) == 4 * 4 * 2
     assert (tmp_path / "report" / "figures" / "drift_test_drift.png").stat().st_size > 0
+    assert not (tmp_path / "report" / "tables" / "drift_test_event.csv").exists()

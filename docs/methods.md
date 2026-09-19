@@ -24,17 +24,18 @@ Each edge takes its source node's timestep as `edge_time`. That definition is ca
 
 We model Elliptic++ as a transaction graph: a node is a transaction, an edge is a flow of bitcoin from one transaction's outputs to another's inputs (D1). The 49 timesteps form 49 disconnected components. The Elliptic++ actor (wallet) graph, where entities do persist across time, is out of scope.
 
-This graph structure fixes how many evaluation regimes Elliptic can support. Three regimes are defined (PR-E1):
+This graph structure fixes how many evaluation regimes Elliptic can support. Four regimes are defined (PR-E1, PR-E7):
 
 - **random**: a stratified partition of labelled nodes, ignoring time. Training and test nodes share timestep components, so a GNN aggregates test nodes' features (never their labels) during training. The regime is transductive and leaks the future; we run it to measure what a random split inflates.
-- **temporal**: train on earlier timesteps, validate and test on later ones.
+- **temporal**: train on earlier timesteps, validate and test on later ones. The model is fitted once and never refreshed.
+- **temporal_rolling**: the temporal window slides forward one batch per test batch. For test batch *t* the model is refit on labels up to *t* − 4 and thresholded on *t* − 3 … *t* − 1, so each step is an ordinary temporal fit and the twelve test batches are scored by twelve models. It is the deployment-realistic counterpart of `temporal`: what a model that is always as fresh as its labels allow can do, with zero label lag beyond the validation window (§5).
 - **temporal_inductive**: as temporal, with test nodes removed from the training graph and their features built only from edges that existed at their own time.
 
 On Elliptic the temporal split is already inductive. No edge crosses a timestep, so no test node can appear in any training node's neighbourhood and no training-period edge can reach a test node's features. A separate inductive regime would produce the same partition under a different name. The toolkit therefore treats `temporal_inductive` as undefined on Elliptic. `build_split` raises `RegimeNotSupportedError` whenever `meta.cross_time_edges` is False, with the message:
 
 > temporal_inductive is rejected on elliptic_pp: meta.cross_time_edges is False, so its temporal split is already inductive by construction and a separate inductive regime is undefined (D1).
 
-The pipeline builds every split before the first model fit, so a config that requests the regime fails in seconds instead of after hours of fitting. The `temporal_inductive` regime is not implemented on AMLworld either; both datasets are evaluated under random and temporal splits only.
+The pipeline builds every split before the first model fit, so a config that requests the regime fails in seconds instead of after hours of fitting. The `temporal_inductive` regime is not implemented on AMLworld either; AMLworld is evaluated under random and temporal splits only, and `temporal_rolling` is run on Elliptic only (§12.6).
 
 ## 3. Feature sets: `base`, `base_gfp` and `raw165`
 
@@ -148,6 +149,8 @@ Both regimes partition labelled nodes only (46,564 on Elliptic).
 
 The random split is two stratified cuts with scikit-learn's `train_test_split`: 70% for training, then the remainder divided evenly between validation and test. The temporal test window spans the dark-market shutdown at t43.
 
+**Rolling refit** (`temporal_rolling`, PR-E7) reuses the temporal bounds as a template. For each test batch *t* from 38 to 49 the whole window shifts by *t* − 38: train ≤ 34 + (*t* − 38), val [35, 37] + (*t* − 38), test [*t*, *t*]. Each step is built by the same temporal builder, passes the same leakage assertions and is cached under its own definition hash, so the regime is twelve temporal splits, each with its own `split_hash`; the child run logs a hash over the twelve. The label lag is the validation window only: at *t* the newest label the model has seen is from *t* − 1, and the newest label it trained on is from *t* − 4. Elliptic timesteps are about two weeks apart, so this is an optimistic bound on what refitting can recover, not a retraining policy.
+
 **Leakage assertions** run on every build (`splits/builder.py`), and a failure stops the run:
 
 - train, validation and test are pairwise disjoint;
@@ -212,7 +215,7 @@ The Elliptic grid ran 50 fits (5 configs × 2 regimes × 5 seeds) in under nine 
 
 `choose_threshold` takes the validation labels and validation scores and nothing else; its signature has no way to receive test data (PR-E4). It builds the precision-recall curve on validation, computes positive-class F1 at every threshold on the curve, and returns the threshold with the highest F1. When several thresholds tie, it returns the highest one: same F1, fewer alerts. A node is predicted illicit when its score is at or above the threshold.
 
-The pipeline scores test once, with that threshold. A unit test spies on `choose_threshold` and asserts that, on every fit, it receives the validation set and nothing else. The validation F1 at the chosen threshold is logged as `val_f1`, a selection diagnostic that makes a validation/test disagreement visible; it never appears in a results table.
+The pipeline scores test once, with that threshold. Under `temporal_rolling` every step chooses its own threshold on its own validation window and scores its one test batch with it; the stitched test set therefore carries one threshold per row, and the pooled F1 is computed from those per-step decisions. The rank metrics (PR-AUC, ROC-AUC, P@R) are not reported for a rolling run: twelve models do not share a score scale, so pooling their scores would rank a 0.6 from one against a 0.6 from another. Per-batch PR-AUC, where one model scores one batch, is in the per-timestep curve. A unit test spies on `choose_threshold` and asserts that, on every fit, it receives the validation set and nothing else. The validation F1 at the chosen threshold is logged as `val_f1`, a selection diagnostic that makes a validation/test disagreement visible; it never appears in a results table.
 
 ### 7.2 Metrics
 
@@ -318,6 +321,7 @@ To regenerate: check out `mvp`, run `uv sync`, place the three Elliptic++ 2023.1
 ## 11. Limitations
 
 - **AMLworld is synthetic** (NFR-4). Its transactions and laundering typologies come from a simulator (Altman et al., 2023). Results on AMLworld describe the simulator's world; no claim is made that they generalise to real bank transactions.
+- **Rolling refit is an upper bound.** `temporal_rolling` refits at zero label lag beyond the validation window, and its late thresholds validate on 29 to 60 illicit units (§12.6). It says what fresh labels can buy, not what a retraining policy with real label delay would.
 - **Elliptic has one natural drift event.** The dark-market shutdown at t43 is a single observation. Any lead time a detector shows on it (S3) is reported as one observation, not an estimate of detector performance.
 - **The Elliptic temporal test mixes two regimes.** Test F1 averages a period where every model works (t38–42) with one where none does (t43–49), and validation (t35–37) precedes the shutdown. The headline mean needs the per-window numbers of §12 beside it.
 - **No search.** Every result is trial 0. The XGBoost reference is library defaults and the SAGE reference is partly our choice; neither is tuned.
@@ -371,32 +375,82 @@ The random split inflates F1 by 0.18 to 0.34 over the temporal split for every c
 
 The GFP result is coherent with the field: on Elliptic the timestep components are disconnected, so a one-timestep GFP window has little to see, and Maganti (2026) finds the real edges carry less signal than shuffled ones under shift. On AMLworld, where GFP is IBM's own headline, the same two-by-two shows whether that reverses.
 
-### 12.3 AMLworld HI-Small (`7c22e3e-dirty`)
+### 12.3 AMLworld HI-Small (`2546822`)
 
-Temporal split, days 0–5 / 6–7 / 8–17 (§9.1), three seeds, from `report/tables/amlworld_xgb_results.csv`. XGBoost is deterministic, so the intervals are zero (§8.3).
+Temporal split, days 0–5 / 6–7 / 8–17 (§9.1), three seeds, from `report/tables/amlworld_xgb_results.csv` (`configs/amlworld_xgb.yaml`). XGBoost is deterministic, so the intervals are zero (§8.3).
 
 | Config | F1 | PR-AUC | P@R0.5 | P@R0.8 |
 |---|---|---|---|---|
 | `xgb.base` | 0.209 | 0.109 | 0.090 | 0.034 |
 | `xgb.base_gfp` | 0.539 | 0.521 | 0.570 | 0.099 |
 
-On AMLworld the GFP features more than double F1, the reverse of Elliptic. The test window reaches into the post-day-10 laundering tail (§9.1), so the per-day curve (`report/tables/amlworld_xgb_curves.csv`) matters here as it does on Elliptic: on the two realistic test days (8–9) GFP takes F1 from 0.10–0.20 to 0.38–0.45, and from day 10 every config scores PR-AUC above 0.92. The SAGE rows need the Kaggle run in `kaggle/amlworld_sage.md`. The run was made from a working tree with uncommitted changes, and its `-dirty` stamp (§10.2) says so; it is rerun from a clean commit before these numbers are tagged.
+On AMLworld the GFP features more than double F1, the reverse of Elliptic. The test window reaches into the post-day-10 laundering tail (§9.1), so the per-day curve (`report/tables/amlworld_xgb_curves.csv`) matters here as it does on Elliptic: on the two realistic test days (8–9) GFP takes F1 from 0.10–0.20 to 0.38–0.45, and from day 10 every config scores PR-AUC above 0.92. The SAGE rows need the Kaggle run in `kaggle/amlworld_sage.md`. A first run was stamped `7c22e3e-dirty` (§10.2); the clean rerun at `2546822` reproduced it exactly.
 
-### 12.4 Drift monitor on the t43 shutdown (`625947c`)
+### 12.4 Drift monitor on the t43 shutdown (`7a19cb9`)
 
-`mulegraph drift --config configs/elliptic_drift.yaml` fits `xgb.base_gfp` and `sage.base_gfp` on the temporal split, then scores every unit from t35 to t49 with no labels (design §3.4, PR-R2). The reference is the validation window t35–37. Three detectors run per batch: maximum PSI over feature columns, the fraction of feature columns whose KS test rejects at 0.01, and the KS statistic on the model's scores. With textbook flags (PSI > 0.2, KS p < 0.01) every test batch is flagged, because at 2,500–7,000 rows a batch the tests reject almost anything. Each flag is therefore calibrated to the detector's largest leave-one-out score inside the reference window.
+`mulegraph drift --config configs/elliptic_drift.yaml` fits `xgb.base_gfp` and `sage.base_gfp` on the temporal split, then scores every unit from t35 to t49 with no labels (design §3.4, PR-R2). The reference is the validation window t35–37. Four detectors run per batch: maximum PSI over feature columns, the fraction of feature columns whose KS test rejects at 0.01, the KS statistic on the model's scores, and the alert rate, the absolute log ratio of the share of units at or above the validation threshold against the reference share. With textbook flags (PSI > 0.2, KS p < 0.01) every test batch is flagged, because at 2,500–7,000 rows a batch the tests reject almost anything. Each flag is therefore calibrated to the detector's largest leave-one-out score inside the reference window.
+
+PSI's bins changed at `ea5ecce`. Importing snapml enables flush-to-zero for the process, so the subnormal cut the earlier code placed just above a constant reference value collapsed onto it and PSI scored 0 for any shift in a constant column, on every real run, since the feature builder imports snapml first. Bins are now (a, b] at every distinct reference quantile but the maximum, which also gives binary columns a cut. With them PSI's calibrated flag is 1.90 instead of 1.52 and the t48–49 flags of the `8c28027` run are gone.
 
 A model counts as broken at the first timestep that starts two consecutive batches of F1 more than 20% below its validation mean. A detector warns at the first timestep that starts two consecutive flags. Lead time is the first minus the second. Both need the same persistence; an earlier rule that counted a single flag reported 3–4 timesteps of warning that disappear under the symmetric rule. The validation mean is F1 at the threshold chosen on that window, so it is optimistic (design §3.4).
 
 | Model | Detector | First held flag | F1 drop | Lead |
 |---|---|---|---|---|
-| `xgb.base_gfp` | PSI on features | t48 | t43 | −5 |
+| `xgb.base_gfp` | PSI on features | never | t43 | — |
 | `xgb.base_gfp` | KS on features | never | t43 | — |
 | `xgb.base_gfp` | KS on scores | never | t43 | — |
-| `sage.base_gfp` | PSI on features | t48 | t39 (3 seeds), t43 (2 seeds) | −9 / −5 |
-| `sage.base_gfp` | KS on features, KS on scores | never | as above | — |
+| `xgb.base_gfp` | alert rate | t38 | t43 | +5 |
+| `sage.base_gfp` | all four | never | t39 (3 seeds), t43 (2 seeds) | — |
 
-No detector warns before the collapse. The SAGE drop at t39 is a dip below the drop level that recovers by t42, not the shutdown. Feature detectors see only features, so their flags are identical across models and seeds, and XGBoost's seeds give identical fits: this is one observation of one event (§11). Tables: `report/tables/elliptic_drift_scores.csv`, `report/tables/elliptic_drift_lead_time.csv`.
+No detector warns of the collapse. PSI flags t39, t41 and t46 singly and never two in a row. KS on features flags t40, t43, t47 and t49 singly. Score KS flags t49 alone. The alert rate is the one detector whose largest score sits at t43: XGBoost's alerts fall from 4.4% of scored units in the reference window to 1.5%, a score of 1.34 against a calibrated flag of 0.38, the largest signal any detector produces anywhere in the series. It does not hold because at t44 the model alerts at a normal rate again, on the wrong units (§12.5). Its held flag at t38–39 is the opposite movement: alerts rise to 7.6% and 7.3% as the labelled illicit share doubles at t38, and the lead rule, which credits the first held flag of any kind, scores that as +5. It is a flag for a different change, not a warning of the shutdown; a lead-time rule that only credits flags in the same direction as the drop would remove it, and we have not added one. For SAGE the reference timesteps disagree with each other more (calibrated alert flag 0.67–0.88 across seeds) and the alert rate never flags. The SAGE drop at t39 is a dip below the drop level that recovers by t42, not the shutdown. Feature detectors see only features, so their flags are identical across models and seeds, and XGBoost's seeds give identical fits: this is one observation of one event (§11). Tables: `report/tables/elliptic_drift_scores.csv`, `report/tables/elliptic_drift_lead_time.csv`.
+
+### 12.5 Why t43 breaks every model and every detector (`8c28027`)
+
+The same drift run, with `drift.event: 43`, splits the labelled test units at t43 (design §3.4 step 5, PR-R5). For each side it records how the fitted model transfers, and it refits a probe: XGBoost with library defaults, 5-fold stratified CV inside that window alone. From `report/tables/elliptic_drift_event.csv` at `8c28027`; the `7a19cb9` rerun reproduces the XGBoost rows bit for bit and moves the SAGE means by at most 0.02 (GPU nondeterminism, §6.2). SAGE is the mean over five seeds with the range in brackets, and XGBoost's seeds are identical.
+
+| | t38–42 | t43–49 |
+|---|---|---|
+| Labelled units (illicit) | 6,436 (659, 10.2%) | 6,687 (169, 2.5%) |
+| `xgb.base_gfp` ROC-AUC | 0.957 | 0.556 |
+| `xgb.base_gfp` recall at the validation threshold | 0.713 | 0.018 |
+| `xgb.base_gfp` median score of illicit units | 0.999 | 0.000 |
+| `sage.base_gfp` ROC-AUC | 0.929 [0.926, 0.937] | 0.681 [0.639, 0.727] |
+| `sage.base_gfp` recall at the validation threshold | 0.595 [0.549, 0.651] | 0.020 [0.012, 0.030] |
+| `sage.base_gfp` median score of illicit units | 0.966 [0.942, 0.986] | 0.058 [0.008, 0.130] |
+| Probe ROC-AUC, refit inside the window | 0.993 | 0.985 |
+
+Three readings follow.
+
+**The models are confidently wrong, not uncertain.** After t43 the median illicit unit scores 0.000 under XGBoost, and ROC-AUC falls to near chance for XGBoost (0.56), so no threshold rescues it: the ranking itself is gone. SAGE keeps slightly more of the ranking but recalls no more.
+
+**The new illicit behaviour is learnable; it is just different.** Refit inside t43–49 alone, the probe separates illicit from licit about as well as it does before the shutdown (0.985 against 0.993). The labels after t43 are consistent; the rule that fits t1–34 no longer applies to them. The benchmark's random split shows the same from the other side: with some post-t43 units in training, its per-timestep F1 recovers to 0.89 and 0.95 at t48–49 for `xgb.base_gfp` (0.74 and 0.85 for SAGE), while every temporal config stays at or below 0.04 (`report/tables/elliptic_mvp_curves.csv`). Those random-split timesteps hold only 5 and 11 illicit test units, so the recovery is indicative. The probe's folds are random within the window, so 0.985 measures separability, not what a deployed model would reach.
+
+**Nothing in the model class can fix this, and nothing label-free sees it.** Every config learns from the same t1–34 illicit pattern. Graph structure cannot supply the new one: Elliptic's timesteps are disconnected, so GFP windows and SAGE neighbourhoods see only the same timestep (§11). Weber et al. (2019) report the same collapse for a random forest retrained after each test step. The detectors, meanwhile, watch whole batches. At t43 the 24 illicit units are under 2% of the 1,370 labelled units and a smaller share of all scored units. From t42 to t43, PSI falls from 1.41 to 1.36 against a flag at 1.90. Feature KS rises from 0.64 to 0.71, which flags t43 alone, above its 0.64 flag, but falls to 0.53 at t44, so the flag does not hold. Score KS for XGBoost falls from 0.094 to 0.084 against a flag at 0.186. Because the model scores the new illicit units as licit, the score distribution loses high scores and looks calmer, not stranger. The one detector that reads that calm as a signal is the alert rate (§12.4): XGBoost's share of alerts falls from 4.4% to 1.5%, a score of 1.34 against a flag of 0.38, but at t44 the model fires again at a normal rate on the wrong units, so the flag does not hold either. The change is in which feature patterns are illicit, for a small minority of rows. Marginal-distribution detectors are blind to that by construction, which is why §12.4 is negative for every detector rather than a matter of calibration. A domain classifier, XGBoost defaults telling reference rows from a batch's rows, was tried outside the toolkit and rejected: it separates every Elliptic timestep from the reference at ROC-AUC ≥ 0.99, t38 to t49 alike, so it is saturated before the shutdown.
+
+### 12.6 Rolling refit: what labels buy after t43 (`46f9771`)
+
+`mulegraph run --config configs/elliptic_rolling.yaml` runs the four Elliptic configs under `temporal` and `temporal_rolling` (§2, §5) on the same bounds: 20 fixed fits and 240 refits, 35 minutes on the RTX 4060. The fixed rows reproduce §12.2 for XGBoost bit for bit (F1 0.7215 and 0.7183). Rank metrics are not reported for a rolling run, because twelve models do not share a score scale (§7.1); F1 is pooled from each step's own threshold. Pooled F1 by window, seed mean, from `report/tables/elliptic_rolling_curves.csv` and the logged predictions. The last column is the paired-by-seed difference, rolling minus fixed, with its 95% t-interval (§8.3); XGBoost is deterministic, so its pairs are degenerate and no significance is claimed for them.
+
+| Config | Window | Fixed | Rolling | Paired difference |
+|---|---|---|---|---|
+| `xgb.base` | t38–42 | 0.848 | 0.843 | −0.005 |
+| `xgb.base` | t43–49 | 0.019 | 0.352 | +0.333 |
+| `xgb.base_gfp` | t38–42 | 0.829 | 0.854 | +0.025 |
+| `xgb.base_gfp` | t43–49 | 0.033 | 0.358 | +0.325 |
+| `sage.base` | t38–42 | 0.749 | 0.753 | +0.004 [−0.031, +0.039] |
+| `sage.base` | t43–49 | 0.015 | 0.101 | +0.086 [+0.025, +0.148] |
+| `sage.base_gfp` | t38–42 | 0.695 | 0.734 | +0.039 [+0.021, +0.057] |
+| `sage.base_gfp` | t43–49 | 0.020 | 0.094 | +0.074 [+0.044, +0.104] |
+
+Four readings follow.
+
+**Refitting helps only after the labels arrive.** Before t43 rolling changes little: XGBoost moves by −0.005 and +0.025, and only `sage.base_gfp` gains significantly (+0.039). After t43 the pooled F1 rises from 0.02–0.03 to 0.35–0.36 for XGBoost and from 0.02 to about 0.10 for SAGE, and both SAGE gains exclude zero. Per timestep the recovery is late. F1 is 0.00 at t43 for every config and at most 0.14 through t46, then reaches 0.25–0.32 at t47 and 0.64–0.68 at t49 for XGBoost (SAGE peaks at 0.27–0.34 at t48). The window in which no refit helps is the four timesteps after the shutdown, where only 24, 24, 5 and 2 illicit units exist to learn from.
+
+**The ranking recovers before the decision rule does.** §12.5's probe showed the post-t43 pattern is learnable; the rolling thresholds show what it costs to use it. The validation-chosen threshold of `xgb.base_gfp` falls from 0.80–0.91 through t45 to 0.087 at t46 and 0.012 at t49, because the scores of the newly learned illicit units sit low until enough of them are in training. A model held to the pre-shutdown threshold of 0.97 recalls 2% of the illicit units (§12.5).
+
+**Features do not change it.** `base` and `base_gfp` reach 0.352 and 0.358 for XGBoost and 0.101 and 0.094 for SAGE after t43. What separates the configs is the model: XGBoost's post-t43 F1 is about three times SAGE's, a gap the seed spread does not close: the upper end of SAGE's paired interval puts its rolling F1 at about 0.16 at most, though we did not test it as a rolling-versus-rolling pair. The answer to "which configuration generalises past t43" is none, and the one lever that moves any of them is fresh labels.
+
+**What this does not show.** The refit is at zero label lag beyond the three-timestep validation window; in deployment labels arrive later, so this is an upper bound (§5). The late thresholds rest on little: the step at t47 validates on 31 illicit units (t44–46), the step at t48 on 29, and the t46 test batch holds 2 illicit units, so the per-timestep curve at t45–46 is close to noise and the pooled window F1 rests on 169 illicit units in all. It is one event on one dataset (§11), and the alert-rate detector of §12.4 has no rolling counterpart: drift runs one temporal regime only.
 
 ## 13. Related work and positioning
 

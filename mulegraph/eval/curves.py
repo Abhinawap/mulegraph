@@ -14,13 +14,14 @@ CURVE_METRICS = ("f1", "pr_auc")
 
 
 def per_timestep(
-    pred: Predictions, threshold: float, which: Sequence[str] = CURVE_METRICS
+    pred: Predictions, threshold: float | np.ndarray, which: Sequence[str] = CURVE_METRICS
 ) -> pd.DataFrame:
     """One row per timestep in ``pred``; ``threshold`` is given, never chosen here (PR-E4)."""
     rows = []
     for t in np.unique(pred.time):
         mask = pred.time == t
-        scored = compute_metrics(pred.y[mask], pred.proba[mask], threshold, which)
+        thr = threshold[mask] if np.ndim(threshold) else threshold
+        scored = compute_metrics(pred.y[mask], pred.proba[mask], thr, which)
         rows.append(
             {
                 "time": int(t),

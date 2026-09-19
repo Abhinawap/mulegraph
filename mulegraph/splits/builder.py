@@ -63,6 +63,23 @@ def _random_split(data: GraphDataset, cfg: RegimeConfig) -> tuple[np.ndarray, ..
     return train, val, test
 
 
+def rolling_steps(cfg: RegimeConfig) -> list[RegimeConfig]:
+    """One temporal RegimeConfig per test batch, the whole window shifted forward (PR-E7)."""
+    assert cfg.train_end is not None and cfg.val is not None and cfg.test is not None
+    steps = []
+    for t in range(cfg.test[0], cfg.test[1] + 1):
+        shift = t - cfg.test[0]
+        steps.append(
+            RegimeConfig(
+                regime="temporal",
+                train_end=cfg.train_end + shift,
+                val=(cfg.val[0] + shift, cfg.val[1] + shift),
+                test=(t, t),
+            )
+        )
+    return steps
+
+
 def _temporal_split(data: GraphDataset, cfg: RegimeConfig) -> tuple[np.ndarray, ...]:
     """Chronological partition on ``batch_id``; both val and test bounds are inclusive."""
     assert cfg.train_end is not None and cfg.val is not None and cfg.test is not None
@@ -167,7 +184,10 @@ def build_split(data: GraphDataset, cfg: RegimeConfig, cache_dir: Path) -> Split
     elif cfg.regime == "temporal":
         train, val, test = _temporal_split(data, cfg)
     else:
-        raise RegimeNotSupportedError(f"Unknown regime {cfg.regime!r}")
+        raise RegimeNotSupportedError(
+            f"{cfg.regime!r} is built step by step through rolling_steps(), one temporal split "
+            "per test batch; build_split does not build it directly"
+        )
 
     # Split.__post_init__ requires sorted, duplicate-free int64 indices.
     train, val, test = (np.sort(p).astype(np.int64) for p in (train, val, test))

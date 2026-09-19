@@ -21,10 +21,10 @@ mulegraph/
   util.py           # Paths, hashing, seeding, provenance
   data/             # elliptic.py (node task), amlworld.py (edge task), synthetic.py -> GraphDataset
   features/         # Causal graph features via snapml GFP; node_agg_v1 fold on node tasks
-  splits/           # random | temporal on batch_id + leakage assertions
+  splits/           # random | temporal | temporal_rolling on batch_id + leakage assertions
   models/           # xgb, sage behind one fit/predict_proba protocol
   eval/             # Thresholding, metrics, seed t-intervals, curves.py (per-timestep)
-  drift/            # detectors.py (PSI, KS, confidence shift), monitor.py (batch scores, lead time)
+  drift/            # detectors.py (PSI, KS, confidence shift, alert rate), monitor.py (batch scores, lead time)
   report/           # tables.py (MLflow -> CSV), figures.py (curves, drift PNG)
 configs/            # One YAML per experiment; validated with Pydantic
 tests/
@@ -59,7 +59,7 @@ Deliberately absent: frontend, HTTP API, database server, cloud services, LLMs.
 - NEVER report accuracy as a headline metric (PR-E6).
 - `base` features NEVER include pre-aggregated neighbour features. On Elliptic `base` = 93 local features; the published 165-block is a separate `xgb.raw165` row (PR-M7).
 - A gap is "significant" only if its paired-by-seed 95% t-interval excludes zero. Bootstrap bands are for per-timestep curves only and NEVER used to call a gap significant (PR-E3).
-- Drift detectors NEVER see labels (PR-R2). Labels enter only in the lead-time evaluation.
+- Drift detectors NEVER see labels (PR-R2): they get features, scores and the validation-chosen threshold. Labels enter only in the lead-time and event evaluation.
 - Every model runs its fixed reference configuration; runs log `trials_completed = 0` honestly (D2).
 
 **Reproducibility (NFR-1):**
@@ -96,7 +96,9 @@ uv run mulegraph --help
 
 # Benchmark
 uv run mulegraph run --config configs/elliptic_mvp.yaml
-uv run mulegraph run --config configs/amlworld_hi_small.yaml
+uv run mulegraph run --config configs/amlworld_xgb.yaml       # XGBoost rows only, laptop
+uv run mulegraph run --config configs/amlworld_hi_small.yaml  # full grid with SAGE, Kaggle
+uv run mulegraph run --config configs/elliptic_rolling.yaml   # fixed vs rolling refit, ~35 min
 uv run mulegraph drift --config configs/elliptic_drift.yaml
 uv run mulegraph smoke                     # ~10 s, synthetic graph, used in CI
 

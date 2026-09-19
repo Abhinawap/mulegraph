@@ -23,13 +23,14 @@ def psi(ref: np.ndarray, cur: np.ndarray, bins: int = 10) -> np.ndarray:
     q = np.linspace(0.0, 1.0, bins + 1)
     for k in range(ref.shape[1]):
         cuts = np.unique(np.quantile(ref[:, k], q))
-        # A constant reference column gets one cut just above its value, so anything
-        # larger lands in a bin the reference never occupied.
-        inner = cuts[1:-1] if cuts.size >= 2 else np.nextafter(cuts, np.inf)
-        edges = np.concatenate([[-np.inf], inner, [np.inf]])
-        r = np.histogram(ref[:, k], edges)[0] / ref.shape[0]
-        c = np.histogram(cur[:, k], edges)[0] / cur.shape[0]
-        r, c = np.clip(r, EPS, None), np.clip(c, EPS, None)
+        # Bins are (a, b], cut at every distinct reference quantile but the maximum, so a
+        # constant or binary column still gets a cut at its value and anything larger lands
+        # in a bin the reference never occupied. No cut is nudged with nextafter: snapml
+        # sets flush-to-zero for the process, and a subnormal cut above 0.0 collapses onto it.
+        inner = cuts[:-1] if cuts.size > 1 else cuts
+        r = np.bincount(np.digitize(ref[:, k], inner, right=True), minlength=inner.size + 1)
+        c = np.bincount(np.digitize(cur[:, k], inner, right=True), minlength=inner.size + 1)
+        r, c = np.clip(r / ref.shape[0], EPS, None), np.clip(c / cur.shape[0], EPS, None)
         out[k] = float(np.sum((c - r) * np.log(c / r)))
     return out
 
@@ -47,3 +48,12 @@ def conf_shift(ref_p: np.ndarray, cur_p: np.ndarray) -> tuple[float, float]:
         raise ValueError("ref_p and cur_p must both be non-empty")
     res = ks_2samp(ref_p, cur_p)
     return float(res.statistic), float(res.pvalue)
+
+
+def alert_shift(ref_p: np.ndarray, cur_p: np.ndarray, threshold: float) -> float:
+    """|log ratio| of the share of scores at or above the validation threshold (PR-R1)."""
+    if ref_p.size == 0 or cur_p.size == 0:
+        raise ValueError("ref_p and cur_p must both be non-empty")
+    ref_rate = (ref_p >= threshold).mean()
+    cur_rate = (cur_p >= threshold).mean()
+    return float(abs(np.log(cur_rate + EPS) - np.log(ref_rate + EPS)))

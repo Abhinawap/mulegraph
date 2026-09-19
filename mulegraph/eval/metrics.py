@@ -61,7 +61,7 @@ def precision_at_recall(y: np.ndarray, p: np.ndarray, target_recall: float) -> f
 def compute_metrics(
     y: np.ndarray,
     p: np.ndarray,
-    threshold: float,
+    threshold: float | np.ndarray,
     which: Sequence[str] | None = None,
     prefix: str = "",
 ) -> dict[str, float]:
@@ -77,6 +77,12 @@ def compute_metrics(
     if unknown:
         raise ValueError(f"unknown metric(s) {unknown}; known: {list(ALL_METRICS)}")
 
+    thr = np.asarray(threshold)
+    if thr.ndim and thr.shape != p_arr.shape:
+        raise ValueError(
+            f"threshold has shape {thr.shape} but p has shape {p_arr.shape}: a per-row "
+            "threshold must have one entry per scored row"
+        )
     pred = (p_arr >= threshold).astype(np.int64)
     n_pos = int((y_arr == 1).sum())
     # ROC-AUC needs both classes present; PR-AUC and F1 degrade gracefully.

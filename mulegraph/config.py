@@ -12,7 +12,7 @@ from pydantic import BaseModel, Field, model_validator
 
 log = logging.getLogger("mulegraph")
 
-Regime = Literal["random", "temporal", "temporal_inductive"]
+Regime = Literal["random", "temporal", "temporal_rolling", "temporal_inductive"]
 FeatureSelection = Literal["base", "base_gfp", "raw165"]
 MetricName = Literal["f1", "pr_auc", "roc_auc", "p_at_r50", "p_at_r80"]
 GfpFamily = Literal["fan", "degree", "scatter_gather", "lc_cycle", "temp_cycle"]
@@ -116,6 +116,14 @@ class RegimeConfig(Strict):
     def key(self) -> str:
         return self.regime
 
+    @property
+    def fits(self) -> int:
+        """Fits per (model, seed): one, or one refit per test batch when rolling (PR-E7)."""
+        if self.regime == "temporal_rolling":
+            assert self.test is not None
+            return self.test[1] - self.test[0] + 1
+        return 1
+
 
 class SplitConfig(Strict):
     regimes: list[RegimeConfig] = Field(min_length=1)
@@ -203,26 +211,30 @@ class RunConfig(Strict):
         return any(m.features == "base_gfp" for m in self.models)
 
     def total_fits(self) -> int:
-        return len(self.models) * len(self.split.regimes) * len(self.seeds)
+        return len(self.models) * len(self.seeds) * sum(r.fits for r in self.split.regimes)
 
 
 class DriftConfig(Strict):
     """Detector thresholds (PR-R1); the reference is always the validation window."""
 
-    detectors: list[Literal["psi", "ks", "conf"]] = Field(
-        default_factory=lambda: ["psi", "ks", "conf"], min_length=1
+    detectors: list[Literal["psi", "ks", "conf", "alert"]] = Field(
+        default_factory=lambda: ["psi", "ks", "conf", "alert"], min_length=1
     )
     bins: int = Field(10, ge=2)
     psi_flag: float = Field(0.2, gt=0.0)
     ks_alpha: float = Field(0.01, gt=0.0, lt=1.0)
     ks_frac: float = Field(0.2, gt=0.0, lt=1.0)
     conf_flag: float = Field(0.1, gt=0.0, lt=1.0)
+    #: |log ratio| of the share of units at or above the validation threshold; 0.5 ≈ a 65% change.
+    alert_flag: float = Field(0.5, gt=0.0)
     #: Replace the fixed flags with each detector's leave-one-out maximum inside the reference.
     calibrate: bool = False
     #: Relative F1 fall from the validation mean, sustained for ``drop_run`` batches, = broken;
     #: a detector warns only after ``drop_run`` consecutive flags.
     f1_drop: float = Field(0.2, gt=0.0, lt=1.0)
     drop_run: int = Field(2, ge=1)
+    #: First batch of a known external event; set, the run writes a before/after table (PR-R5).
+    event: int | None = None
 
 
 class DriftRunConfig(RunConfig):
@@ -235,6 +247,13 @@ class DriftRunConfig(RunConfig):
             raise ValueError(
                 "drift needs exactly one regime and it must be temporal: the reference is the "
                 "validation window and every scored batch must come after it in time (PR-R2)"
+            )
+        test = regimes[0].test
+        event = self.drift.event
+        if event is not None and test is not None and not test[0] < event <= test[1]:
+            raise ValueError(
+                f"drift.event {event} must fall inside the test window {test} after its first "
+                "batch, so the test window has a batch on each side of it (PR-R5)"
             )
         return self
 

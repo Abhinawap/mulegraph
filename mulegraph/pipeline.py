@@ -17,17 +17,18 @@ from mulegraph.config import DriftRunConfig, ModelConfig, RunConfig, load_config
 from mulegraph.data import load_dataset
 from mulegraph.drift.monitor import lead_time, score_batches
 from mulegraph.eval.curves import CURVE_METRICS, per_timestep
+from mulegraph.eval.event import event_windows, probe_auc
 from mulegraph.eval.metrics import EXTRA_KEYS, compute_metrics
 from mulegraph.eval.threshold import choose_threshold
 from mulegraph.features.builder import build_features
 from mulegraph.features.select import select_features
 from mulegraph.models import get_model
-from mulegraph.models.base import BaseModel
+from mulegraph.models.base import BaseModel, FitInfo
 from mulegraph.report.figures import plot_curves, plot_drift
 from mulegraph.report.tables import write_results_table
-from mulegraph.splits.builder import build_split
+from mulegraph.splits.builder import build_split, rolling_steps
 from mulegraph.types import FeatureMatrix, GraphDataset, Predictions, Split
-from mulegraph.util import Paths, git_commit, git_dirty, resolve_device, seed_all
+from mulegraph.util import Paths, git_commit, git_dirty, hash_dict, resolve_device, seed_all
 
 log = logging.getLogger("mulegraph")
 
@@ -52,7 +53,7 @@ class Fitted:
     """One fitted (regime, model, seed) with its validation threshold and scored predictions."""
 
     model: BaseModel
-    threshold: float
+    threshold: float | np.ndarray
     val: Predictions
     test: Predictions
     curve: pd.DataFrame  # per-timestep metrics on test (PR-E5)
@@ -86,19 +87,15 @@ def _log_predictions(val: Predictions, test: Predictions) -> None:
         mlflow.log_artifact(str(path))
 
 
-def _fit_one(
-    cfg: RunConfig,
+def _fit_predict(
     data: GraphDataset,
     feats: FeatureMatrix,
     split: Split,
     model_cfg: ModelConfig,
     seed: int,
     device: str,
-    commit: str,
-) -> Fitted:
-    """Fit one (regime, model, seed), threshold on validation, score test, log a child run."""
-    import mlflow
-
+) -> tuple[BaseModel, FitInfo, float, float, Predictions, Predictions]:
+    """Fit on split.train, threshold on split.val (PR-E4), score split.test."""
     seed_all(seed)
     model = get_model(
         model_cfg.name,
@@ -113,12 +110,43 @@ def _fit_one(
     val = _predict(model, data, feats, split.val)
     threshold, val_f1 = choose_threshold(val.y, val.proba)
     test = _predict(model, data, feats, split.test)
-    scored = compute_metrics(test.y, test.proba, threshold, cfg.eval.metrics, prefix="test_")
+    return model, info, threshold, val_f1, val, test
+
+
+def _log_child(
+    cfg: RunConfig,
+    data: GraphDataset,
+    feats: FeatureMatrix,
+    regime: str,
+    split_hash: str,
+    model_cfg: ModelConfig,
+    seed: int,
+    device: str,
+    commit: str,
+    model: BaseModel,
+    info: FitInfo,
+    threshold: float | np.ndarray,
+    val_f1: float,
+    val: Predictions,
+    test: Predictions,
+    extra_steps: dict[int, dict[str, float]] | None = None,
+) -> Fitted:
+    """Score test at the validation threshold, log one MLflow child run (PR-E4, PR-O1, PR-E7)."""
+    import mlflow
+
+    # A rolling test set is scored by one model per batch, so only the thresholded metric is
+    # comparable across the stitched rows; rank metrics over incomparable score scales are
+    # not logged and live in the per-timestep curve instead (PR-E7).
+    rolling = np.ndim(threshold) > 0
+    metrics = [m for m in cfg.eval.metrics if m == "f1"] if rolling else cfg.eval.metrics
+    scored = compute_metrics(test.y, test.proba, threshold, metrics, prefix="test_")
     # Counts and point precision/recall are diagnostics: the results table is metrics.test_* only.
     diagnostics = {f"diag_{key}": scored.pop(f"test_{key}") for key in EXTRA_KEYS}
     curve = per_timestep(test, threshold)
+    # A rolling run's threshold is a per-row array; the logged scalar is the last step's (PR-E7).
+    thr_scalar = float(threshold) if np.ndim(threshold) == 0 else float(np.ravel(threshold)[-1])
 
-    with mlflow.start_run(run_name=f"{split.regime}.{model_cfg.key}.s{seed}", nested=True):
+    with mlflow.start_run(run_name=f"{regime}.{model_cfg.key}.s{seed}", nested=True):
         mlflow.set_tags(
             {
                 "kind": "child",
@@ -126,11 +154,11 @@ def _fit_one(
                 # Spec §2.3 makes this a tag, not a parent param: nested runs inherit
                 # nothing, and the reporter only ever reads child runs.
                 "dataset_version": data.meta.version,
-                "regime": split.regime,
+                "regime": regime,
                 "model": model_cfg.name,
                 "features": model_cfg.features,
                 "feature_version": feats.feature_version,
-                "split_hash": split.split_hash,
+                "split_hash": split_hash,
                 "git_commit": commit,
             }
         )
@@ -149,7 +177,7 @@ def _fit_one(
                 **scored,
                 **diagnostics,
                 # val_f1 is a selection diagnostic, never a headline metric (PR-E6).
-                "threshold": threshold,
+                "threshold": thr_scalar,
                 "val_f1": val_f1,
                 "fit_seconds": info.seconds,
                 **({} if info.val_pr_auc is None else {"val_pr_auc": info.val_pr_auc}),
@@ -165,8 +193,106 @@ def _fit_one(
                 },
                 step=int(row.time),
             )
+        if extra_steps:
+            # Rolling only: each step's own threshold and val_f1, keyed on its test batch (PR-E7).
+            for t, step_metrics in extra_steps.items():
+                mlflow.log_metrics(step_metrics, step=t)
         _log_predictions(val, test)
     return Fitted(model, threshold, val, test, curve)
+
+
+def _fit_one(
+    cfg: RunConfig,
+    data: GraphDataset,
+    feats: FeatureMatrix,
+    split: Split,
+    model_cfg: ModelConfig,
+    seed: int,
+    device: str,
+    commit: str,
+) -> Fitted:
+    """Fit one (regime, model, seed), threshold on validation, score test, log a child run."""
+    model, info, threshold, val_f1, val, test = _fit_predict(
+        data, feats, split, model_cfg, seed, device
+    )
+    return _log_child(
+        cfg,
+        data,
+        feats,
+        split.regime,
+        split.split_hash,
+        model_cfg,
+        seed,
+        device,
+        commit,
+        model,
+        info,
+        threshold,
+        val_f1,
+        val,
+        test,
+    )
+
+
+def _fit_rolling(
+    cfg: RunConfig,
+    data: GraphDataset,
+    feats: FeatureMatrix,
+    steps: list[Split],
+    model_cfg: ModelConfig,
+    seed: int,
+    device: str,
+    commit: str,
+) -> Fitted:
+    """Refit once per test batch, sliding the window, stitched into one child run (PR-E7)."""
+    # Only the last step's model, validation set and fit diagnostics are kept as the child
+    # run's scalars (twelve fitted SAGE models would each hold the full graph on the GPU);
+    # every step's threshold, val_f1, val_pr_auc and best_iteration are logged at step=t.
+    tests, thresholds, extra_steps, seconds = [], [], {}, 0.0
+    for step in steps:
+        model, info, threshold, val_f1, val, test = _fit_predict(
+            data, feats, step, model_cfg, seed, device
+        )
+        tests.append(test)
+        thresholds.append(np.full(test.idx.size, threshold, dtype=np.float64))
+        extra_steps[int(step.params["test"][0])] = {
+            "ts_threshold": threshold,
+            "ts_val_f1": val_f1,
+            **({} if info.val_pr_auc is None else {"ts_val_pr_auc": info.val_pr_auc}),
+            **({} if info.best_iteration is None else {"ts_best_iteration": info.best_iteration}),
+        }
+        seconds += info.seconds
+
+    stitched = Predictions(
+        idx=np.concatenate([t.idx for t in tests]),
+        proba=np.concatenate([t.proba for t in tests]),
+        y=np.concatenate([t.y for t in tests]),
+        time=np.concatenate([t.time for t in tests]),
+    )
+    info = FitInfo(
+        seconds=seconds,
+        best_iteration=info.best_iteration,
+        val_pr_auc=info.val_pr_auc,
+        extra=info.extra,
+    )
+    return _log_child(
+        cfg,
+        data,
+        feats,
+        "temporal_rolling",
+        hash_dict([step.split_hash for step in steps]),
+        model_cfg,
+        seed,
+        device,
+        commit,
+        model,
+        info,
+        np.concatenate(thresholds),
+        val_f1,
+        val,
+        stitched,
+        extra_steps=extra_steps,
+    )
 
 
 def _prepare(cfg: RunConfig) -> tuple[Paths, str, str, str]:
@@ -204,16 +330,22 @@ def run_benchmark(cfg: RunConfig, config_path: Path) -> Path:
     gfp = build_features(data, cfg.features, cache_dir) if cfg.needs_gfp else None
     matrices = {m.features: select_features(data, gfp, m.features) for m in cfg.models}
     # Built before the first fit so an undefined regime fails before hours of work (D1).
-    splits = {r.regime: build_split(data, r, cache_dir) for r in cfg.split.regimes}
+    splits: dict[str, Split | list[Split]] = {}
+    for r in cfg.split.regimes:
+        if r.regime == "temporal_rolling":
+            splits[r.regime] = [build_split(data, step, cache_dir) for step in rolling_steps(r)]
+        else:
+            splits[r.regime] = build_split(data, r, cache_dir)
 
     total = cfg.total_fits()
     log.info(
-        "%s: %d fits (%d models x %d regimes x %d seeds) on %s, tracking to %s",
+        "%s: %d fits (%d models x %d seeds x %d fits over %d regimes) on %s, tracking to %s",
         cfg.mlflow.experiment,
         total,
         len(cfg.models),
-        len(cfg.split.regimes),
         len(cfg.seeds),
+        sum(r.fits for r in cfg.split.regimes),
+        len(cfg.split.regimes),
         device,
         tracking_uri,
     )
@@ -239,31 +371,44 @@ def run_benchmark(cfg: RunConfig, config_path: Path) -> Path:
         )
         mlflow.log_artifact(str(config_path))
         for regime_cfg in cfg.split.regimes:
-            split = splits[regime_cfg.regime]
+            if regime_cfg.regime == "temporal_rolling":
+                log.info("rolling regime: %d refits per (model, seed)", regime_cfg.fits)
             for model_cfg in cfg.models:
                 for seed in cfg.seeds:
-                    done += 1
                     log.info(
                         "fit %d/%d: %s %s seed %d",
-                        done,
+                        done + 1,
                         total,
                         regime_cfg.regime,
                         model_cfg.key,
                         seed,
                     )
-                    fitted = _fit_one(
-                        cfg,
-                        data,
-                        matrices[model_cfg.features],
-                        split,
-                        model_cfg,
-                        seed,
-                        device,
-                        commit,
-                    )
+                    if regime_cfg.regime == "temporal_rolling":
+                        fitted = _fit_rolling(
+                            cfg,
+                            data,
+                            matrices[model_cfg.features],
+                            splits[regime_cfg.regime],
+                            model_cfg,
+                            seed,
+                            device,
+                            commit,
+                        )
+                    else:
+                        fitted = _fit_one(
+                            cfg,
+                            data,
+                            matrices[model_cfg.features],
+                            splits[regime_cfg.regime],
+                            model_cfg,
+                            seed,
+                            device,
+                            commit,
+                        )
+                    done += regime_cfg.fits
                     curves.append(
                         fitted.curve.assign(
-                            regime=split.regime,
+                            regime=regime_cfg.regime,
                             model=model_cfg.name,
                             features=model_cfg.features,
                             seed=seed,
@@ -315,7 +460,19 @@ def run_drift(cfg: DriftRunConfig, config_path: Path) -> Path:
         ref_batches[0],
         ref_batches[-1],
     )
-    scores, leads, curves = [], [], []
+    event = cfg.drift.event
+    probes: dict[tuple[str, str], float] = {}
+    if event is not None:
+        # Labelled test units only; the probe is a separability check, never a detector (PR-R5).
+        before = data.batch_id[split.test] < event
+        for key in matrices:
+            for window, mask in (("before", before), ("after", ~before)):
+                idx = split.test[mask]
+                probes[key, window] = probe_auc(
+                    matrices[key].values[idx], data.y[idx], cfg.seeds[0]
+                )
+        log.info("event at batch %d: probe ROC-AUC %s", event, probes)
+    scores, leads, curves, events = [], [], [], []
     with mlflow.start_run(run_name=f"{cfg.mlflow.experiment}.{commit}"):
         mlflow.set_tags({"kind": "parent", "dataset": data.meta.dataset, "git_commit": commit})
         mlflow.log_params({"dataset_version": data.meta.version, "seeds": list(cfg.seeds)})
@@ -337,6 +494,10 @@ def run_drift(cfg: DriftRunConfig, config_path: Path) -> Path:
                     ks_alpha=cfg.drift.ks_alpha,
                     ks_frac_flag=cfg.drift.ks_frac,
                     conf_flag=cfg.drift.conf_flag,
+                    alert_flag=cfg.drift.alert_flag,
+                    # The validation-chosen threshold (PR-E4); the alert-rate detector counts
+                    # units at or above it and never sees a label (PR-R2).
+                    threshold=fitted.threshold,
                     calibrate=cfg.drift.calibrate,
                 )
                 ref_f1 = float(per_timestep(fitted.val, fitted.threshold)["f1"].mean())
@@ -345,6 +506,12 @@ def run_drift(cfg: DriftRunConfig, config_path: Path) -> Path:
                 scores.append(table.assign(**tag))
                 leads.append(lead.assign(ref_f1=ref_f1, **tag))
                 curves.append(fitted.curve.assign(**tag))
+                if event is not None:
+                    table = event_windows(fitted.test, fitted.threshold, event)
+                    table["probe_roc_auc"] = [
+                        probes[model_cfg.features, w] for w in table["window"]
+                    ]
+                    events.append(table.assign(**tag))
 
         tables_dir = paths.tables_dir()
         tables_dir.mkdir(parents=True, exist_ok=True)
@@ -359,7 +526,11 @@ def run_drift(cfg: DriftRunConfig, config_path: Path) -> Path:
             lead_table,
             paths.figures_dir() / f"{stem}_drift.png",
         )
-        for artifact in (score_path, lead_path, figure):
+        artifacts = [score_path, lead_path, figure]
+        if events:
+            artifacts.append(tables_dir / f"{stem}_event.csv")
+            pd.concat(events, ignore_index=True).to_csv(artifacts[-1], index=False)
+        for artifact in artifacts:
             mlflow.log_artifact(str(artifact))
     log.info("wrote %s and %s", score_path, lead_path)
     return lead_path
