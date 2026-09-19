@@ -27,6 +27,7 @@ from mulegraph.types import GraphDataset
 
 TEMPORAL = RegimeConfig(regime="temporal", train_end=6, val=(7, 9), test=(10, 12))
 RANDOM = RegimeConfig(regime="random", fractions=(0.7, 0.15, 0.15), seed=0)
+ROLLING = RegimeConfig(regime="temporal_rolling", train_end=6, val=(7, 9), test=(10, 12))
 
 
 def make_edge_ds(seed: int = 0) -> GraphDataset:
@@ -215,6 +216,36 @@ def test_check_leakage_rejects_unlabelled_and_positive_free_parts(
     negatives_only = split.val[synthetic_ds.y[split.val] == 0]
     with pytest.raises(ValueError, match="no positives"):
         check_leakage(synthetic_ds, "temporal", split.train, negatives_only, split.test)
+
+
+def test_rolling_steps_shift_the_temporal_window_per_test_batch() -> None:
+    steps = builder.rolling_steps(ROLLING)
+
+    assert len(steps) == ROLLING.test[1] - ROLLING.test[0] + 1 == 3
+    for i, step in enumerate(steps):
+        t = ROLLING.test[0] + i
+        assert step.regime == "temporal"
+        assert step.train_end < step.val[0] <= step.val[1] < step.test[0] == step.test[1] == t
+        assert step.train_end == t - (ROLLING.test[0] - ROLLING.train_end)
+    assert (steps[0].train_end, steps[0].val, steps[0].test) == (
+        ROLLING.train_end,
+        ROLLING.val,
+        (ROLLING.test[0], ROLLING.test[0]),
+    )
+    assert steps[-1].test == (ROLLING.test[1], ROLLING.test[1])
+
+
+def test_rolling_step_passes_leakage_checks(synthetic_ds: GraphDataset, tmp_path: Path) -> None:
+    step = builder.rolling_steps(ROLLING)[1]
+    split = build_split(synthetic_ds, step, tmp_path)
+    assert split.regime == "temporal"
+
+
+def test_build_split_rejects_temporal_rolling_directly(
+    synthetic_ds: GraphDataset, tmp_path: Path
+) -> None:
+    with pytest.raises(RegimeNotSupportedError, match="rolling_steps"):
+        build_split(synthetic_ds, ROLLING, tmp_path)
 
 
 def test_split_hash_depends_on_params(synthetic_ds: GraphDataset) -> None:

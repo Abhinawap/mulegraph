@@ -10,6 +10,7 @@ import csv
 from pathlib import Path
 
 import numpy as np
+import pandas as pd
 import pytest
 
 from mulegraph import pipeline
@@ -49,6 +50,117 @@ def tiny_config(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> RunConfig:
             "device": "cpu",
         }
     )
+
+
+@pytest.fixture
+def rolling_config(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> RunConfig:
+    """One xgb config, four rolling refits per seed, on the same 600-node synthetic graph."""
+    monkeypatch.setenv("MULEGRAPH_DATA_DIR", str(tmp_path / "data"))
+    monkeypatch.setenv("MULEGRAPH_REPORT_DIR", str(tmp_path / "report"))
+    return RunConfig.model_validate(
+        {
+            "dataset": {
+                "name": "synthetic_elliptic",
+                "version": "test",
+                "synthetic": {"n_nodes": 600, "n_timesteps": 12, "illicit_rate": 0.2, "seed": 0},
+            },
+            "features": {"bins": [2, 4], "cycle_len": 4, "num_threads": 2},
+            "split": {
+                "regimes": [
+                    {"regime": "temporal_rolling", "train_end": 6, "val": [7, 8], "test": [9, 12]}
+                ]
+            },
+            "models": [{"name": "xgb", "features": "base", "params": {"n_estimators": 20}}],
+            "seeds": SEEDS,
+            "eval": {"metrics": METRICS},
+            "mlflow": {
+                "experiment": "pipeline_rolling_test",
+                "tracking_uri": f"sqlite:///{tmp_path / 'mlflow.db'}",
+            },
+            "device": "cpu",
+        }
+    )
+
+
+def test_rolling_regime_writes_one_child_run_per_seed(
+    rolling_config: RunConfig, tmp_path: Path
+) -> None:
+    """PR-E7: n_seeds counts (model, seed) child runs, not the internal per-step refits."""
+    table = pipeline.run_benchmark(rolling_config, pipeline.SMOKE_CONFIG)
+    with open(table, newline="") as fh:
+        rows = list(csv.DictReader(fh))
+    assert rows
+    assert {r["regime"] for r in rows} == {"temporal_rolling"}
+    assert {r["n_seeds"] for r in rows} == {str(len(SEEDS))}
+
+
+def test_rolling_curve_has_one_row_per_seed_and_test_timestep(
+    rolling_config: RunConfig, tmp_path: Path
+) -> None:
+    pipeline.run_benchmark(rolling_config, pipeline.SMOKE_CONFIG)
+    with open(
+        tmp_path / "report" / "tables" / "pipeline_rolling_test_curves.csv", newline=""
+    ) as fh:
+        rows = list(csv.DictReader(fh))
+    assert len(rows) == len(SEEDS) * 4
+    assert {r["time"] for r in rows} == {str(t) for t in range(9, 13)}
+    assert {r["regime"] for r in rows} == {"temporal_rolling"}
+
+
+def test_rolling_test_idx_covers_every_labelled_node_in_the_window(
+    rolling_config: RunConfig, tmp_path: Path
+) -> None:
+    """The stitched test set across steps equals every labelled node in batches 9..12."""
+    import mlflow
+
+    pipeline.run_benchmark(rolling_config, pipeline.SMOKE_CONFIG)
+    mlflow.set_tracking_uri(rolling_config.mlflow.resolved_uri())
+    runs = mlflow.search_runs(
+        experiment_names=["pipeline_rolling_test"], filter_string="tags.kind = 'child'"
+    )
+    path = mlflow.artifacts.download_artifacts(
+        run_id=runs.iloc[0]["run_id"], artifact_path="predictions.parquet"
+    )
+    frame = pd.read_parquet(path)
+    test_idx = set(frame.loc[frame["part"] == "test", "idx"].tolist())
+
+    from mulegraph.util import Paths
+
+    paths = Paths.from_env()
+    data = pipeline.load_dataset(rolling_config.dataset, paths.data_dir)
+    labelled = data.labelled_idx
+    expected = set(
+        labelled[(data.batch_id[labelled] >= 9) & (data.batch_id[labelled] <= 12)].tolist()
+    )
+    assert test_idx == expected
+
+
+def test_rolling_threshold_is_chosen_once_per_step_on_its_own_validation(
+    rolling_config: RunConfig, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """PR-E4: a rolling run calls choose_threshold once per step, each on that step's val only."""
+    from mulegraph.splits.builder import build_split, rolling_steps
+    from mulegraph.util import Paths
+
+    seen: list[int] = []
+    real = pipeline.choose_threshold
+
+    def spy(y_val: np.ndarray, p_val: np.ndarray) -> tuple[float, float]:
+        seen.append(int(np.asarray(y_val).size))
+        return real(y_val, p_val)
+
+    monkeypatch.setattr(pipeline, "choose_threshold", spy)
+    pipeline.run_benchmark(rolling_config, pipeline.SMOKE_CONFIG)
+
+    paths = Paths.from_env()
+    data = pipeline.load_dataset(rolling_config.dataset, paths.data_dir)
+    cache_dir = paths.cache_dir(rolling_config.dataset.name, rolling_config.dataset.version)
+    step_val_sizes = [
+        build_split(data, step, cache_dir).val.size
+        for step in rolling_steps(rolling_config.split.regimes[0])
+    ]
+
+    assert seen == step_val_sizes * len(rolling_config.seeds)
 
 
 def test_run_benchmark_writes_the_results_table(tiny_config: RunConfig, tmp_path: Path) -> None:

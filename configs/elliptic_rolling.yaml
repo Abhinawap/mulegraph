@@ -1,0 +1,53 @@
+# Rolling refit: same Elliptic++ window as elliptic_mvp, refit every test batch (PR-E7).
+#
+#   uv run mulegraph run --config configs/elliptic_rolling.yaml
+#
+# Two regimes over the same bounds. `temporal` fits once on train <= 34 and scores
+# the whole 38..49 test span from a single validation-chosen threshold. `temporal_rolling`
+# slides that window forward one batch per test batch: at test batch t the model is
+# fit on labels <= t-4 and thresholded on t-3..t-1, so there is zero label lag beyond
+# the validation window itself. Each step's test predictions for one (model, seed) are
+# stitched into a single test set and logged as one MLflow child run, so the results
+# table still reports n_seeds = 5, not 5 x 12 steps.
+#
+# 20 fixed-window fits + 240 rolling refits (4 models x 5 seeds x 12 steps), about
+# 1.5h on an RTX 4060 — run it in the background.
+
+dataset:
+  name: elliptic_pp
+  version: "2023.1"
+
+features:
+  families: [fan, degree, scatter_gather, lc_cycle]
+  bins: [2, 4, 8, 16, 32]
+  window: 1
+  cycle_len: 10
+  vertex_stats: true
+  num_threads: 8
+
+split:
+  regimes:
+    - regime: temporal
+      train_end: 34
+      val: [35, 37]
+      test: [38, 49]
+    - regime: temporal_rolling
+      train_end: 34
+      val: [35, 37]
+      test: [38, 49]
+
+models:
+  - {name: xgb,  features: base}
+  - {name: xgb,  features: base_gfp}
+  - {name: sage, features: base,     sampler: {kind: neighbor, fanout: [15, 10]}}
+  - {name: sage, features: base_gfp, sampler: {kind: neighbor, fanout: [15, 10]}}
+
+seeds: [0, 1, 2, 3, 4]
+
+eval:
+  metrics: [f1, pr_auc, roc_auc, p_at_r50, p_at_r80]
+
+mlflow:
+  experiment: elliptic_rolling
+
+device: auto
