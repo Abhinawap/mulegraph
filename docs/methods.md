@@ -35,7 +35,7 @@ On Elliptic the temporal split is already inductive. No edge crosses a timestep,
 
 > temporal_inductive is rejected on elliptic_pp: meta.cross_time_edges is False, so its temporal split is already inductive by construction and a separate inductive regime is undefined (D1).
 
-The pipeline builds every split before the first model fit, so a config that requests the regime fails in seconds instead of after hours of fitting. The `temporal_inductive` regime is not implemented on AMLworld either; both datasets are evaluated under random and temporal splits only.
+The pipeline builds every split before the first model fit, so a config that requests the regime fails in seconds instead of after hours of fitting. The `temporal_inductive` regime is not implemented on AMLworld either; AMLworld is evaluated under random and temporal splits only, and `temporal_rolling` is run on Elliptic only (§12.6).
 
 ## 3. Feature sets: `base`, `base_gfp` and `raw165`
 
@@ -321,6 +321,7 @@ To regenerate: check out `mvp`, run `uv sync`, place the three Elliptic++ 2023.1
 ## 11. Limitations
 
 - **AMLworld is synthetic** (NFR-4). Its transactions and laundering typologies come from a simulator (Altman et al., 2023). Results on AMLworld describe the simulator's world; no claim is made that they generalise to real bank transactions.
+- **Rolling refit is an upper bound.** `temporal_rolling` refits at zero label lag beyond the validation window, and its late thresholds validate on 29 to 60 illicit units (§12.6). It says what fresh labels can buy, not what a retraining policy with real label delay would.
 - **Elliptic has one natural drift event.** The dark-market shutdown at t43 is a single observation. Any lead time a detector shows on it (S3) is reported as one observation, not an estimate of detector performance.
 - **The Elliptic temporal test mixes two regimes.** Test F1 averages a period where every model works (t38–42) with one where none does (t43–49), and validation (t35–37) precedes the shutdown. The headline mean needs the per-window numbers of §12 beside it.
 - **No search.** Every result is trial 0. The XGBoost reference is library defaults and the SAGE reference is partly our choice; neither is tuned.
@@ -425,6 +426,31 @@ Three readings follow.
 **The new illicit behaviour is learnable; it is just different.** Refit inside t43–49 alone, the probe separates illicit from licit about as well as it does before the shutdown (0.985 against 0.993). The labels after t43 are consistent; the rule that fits t1–34 no longer applies to them. The benchmark's random split shows the same from the other side: with some post-t43 units in training, its per-timestep F1 recovers to 0.89 and 0.95 at t48–49 for `xgb.base_gfp` (0.74 and 0.85 for SAGE), while every temporal config stays at or below 0.04 (`report/tables/elliptic_mvp_curves.csv`). Those random-split timesteps hold only 5 and 11 illicit test units, so the recovery is indicative. The probe's folds are random within the window, so 0.985 measures separability, not what a deployed model would reach.
 
 **Nothing in the model class can fix this, and nothing label-free sees it.** Every config learns from the same t1–34 illicit pattern. Graph structure cannot supply the new one: Elliptic's timesteps are disconnected, so GFP windows and SAGE neighbourhoods see only the same timestep (§11). Weber et al. (2019) report the same collapse for a random forest retrained after each test step. The detectors, meanwhile, watch whole batches. At t43 the 24 illicit units are under 2% of the 1,370 labelled units and a smaller share of all scored units. From t42 to t43, PSI falls from 1.41 to 1.36 against a flag at 1.90. Feature KS rises from 0.64 to 0.71, which flags t43 alone, above its 0.64 flag, but falls to 0.53 at t44, so the flag does not hold. Score KS for XGBoost falls from 0.094 to 0.084 against a flag at 0.186. Because the model scores the new illicit units as licit, the score distribution loses high scores and looks calmer, not stranger. The one detector that reads that calm as a signal is the alert rate (§12.4): XGBoost's share of alerts falls from 4.4% to 1.5%, a score of 1.34 against a flag of 0.38, but at t44 the model fires again at a normal rate on the wrong units, so the flag does not hold either. The change is in which feature patterns are illicit, for a small minority of rows. Marginal-distribution detectors are blind to that by construction, which is why §12.4 is negative for every detector rather than a matter of calibration. A domain classifier, XGBoost defaults telling reference rows from a batch's rows, was tried outside the toolkit and rejected: it separates every Elliptic timestep from the reference at ROC-AUC ≥ 0.99, t38 to t49 alike, so it is saturated before the shutdown.
+
+### 12.6 Rolling refit: what labels buy after t43 (`46f9771`)
+
+`mulegraph run --config configs/elliptic_rolling.yaml` runs the four Elliptic configs under `temporal` and `temporal_rolling` (§2, §5) on the same bounds: 20 fixed fits and 240 refits, 35 minutes on the RTX 4060. The fixed rows reproduce §12.2 for XGBoost bit for bit (F1 0.7215 and 0.7183). Rank metrics are not reported for a rolling run, because twelve models do not share a score scale (§7.1); F1 is pooled from each step's own threshold. Pooled F1 by window, seed mean, from `report/tables/elliptic_rolling_curves.csv` and the logged predictions. The last column is the paired-by-seed difference, rolling minus fixed, with its 95% t-interval (§8.3); XGBoost is deterministic, so its pairs are degenerate and no significance is claimed for them.
+
+| Config | Window | Fixed | Rolling | Paired difference |
+|---|---|---|---|---|
+| `xgb.base` | t38–42 | 0.848 | 0.843 | −0.005 |
+| `xgb.base` | t43–49 | 0.019 | 0.352 | +0.333 |
+| `xgb.base_gfp` | t38–42 | 0.829 | 0.854 | +0.025 |
+| `xgb.base_gfp` | t43–49 | 0.033 | 0.358 | +0.325 |
+| `sage.base` | t38–42 | 0.749 | 0.753 | +0.004 [−0.031, +0.039] |
+| `sage.base` | t43–49 | 0.015 | 0.101 | +0.086 [+0.025, +0.148] |
+| `sage.base_gfp` | t38–42 | 0.695 | 0.734 | +0.039 [+0.021, +0.057] |
+| `sage.base_gfp` | t43–49 | 0.020 | 0.094 | +0.074 [+0.044, +0.104] |
+
+Four readings follow.
+
+**Refitting helps only after the labels arrive.** Before t43 rolling changes little: XGBoost moves by −0.005 and +0.025, and only `sage.base_gfp` gains significantly (+0.039). After t43 the pooled F1 rises from 0.02–0.03 to 0.35–0.36 for XGBoost and from 0.02 to about 0.10 for SAGE, and both SAGE gains exclude zero. Per timestep the recovery is late. F1 is 0.00 at t43 for every config and at most 0.14 through t46, then reaches 0.25–0.32 at t47 and 0.64–0.68 at t49 for XGBoost (SAGE peaks at 0.27–0.34 at t48). The window in which no refit helps is the four timesteps after the shutdown, where only 24, 24, 5 and 2 illicit units exist to learn from.
+
+**The ranking recovers before the decision rule does.** §12.5's probe showed the post-t43 pattern is learnable; the rolling thresholds show what it costs to use it. The validation-chosen threshold of `xgb.base_gfp` falls from 0.80–0.91 through t45 to 0.087 at t46 and 0.012 at t49, because the scores of the newly learned illicit units sit low until enough of them are in training. A model held to the pre-shutdown threshold of 0.97 recalls 2% of the illicit units (§12.5).
+
+**Features do not change it.** `base` and `base_gfp` reach 0.352 and 0.358 for XGBoost and 0.101 and 0.094 for SAGE after t43. What separates the configs is the model: XGBoost's post-t43 F1 is about three times SAGE's, a gap the seed spread does not close: the upper end of SAGE's paired interval puts its rolling F1 at about 0.16 at most, though we did not test it as a rolling-versus-rolling pair. The answer to "which configuration generalises past t43" is none, and the one lever that moves any of them is fresh labels.
+
+**What this does not show.** The refit is at zero label lag beyond the three-timestep validation window; in deployment labels arrive later, so this is an upper bound (§5). The late thresholds rest on little: the step at t47 validates on 31 illicit units (t44–46), the step at t48 on 29, and the t46 test batch holds 2 illicit units, so the per-timestep curve at t45–46 is close to noise and the pooled window F1 rests on 169 illicit units in all. It is one event on one dataset (§11), and the alert-rate detector of §12.4 has no rolling counterpart: drift runs one temporal regime only.
 
 ## 13. Related work and positioning
 

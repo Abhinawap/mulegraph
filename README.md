@@ -37,6 +37,18 @@ t43 on, when a dark-market shutdown changed what illicit activity looked like. T
 
 ![Per-timestep F1](report/figures/elliptic_mvp_curves.png)
 
+**No configuration generalises past t43; only fresh labels move any of them.** I refit every model each
+test timestep on labels up to four timesteps back, thresholded on the three before it (the
+`temporal_rolling` regime). Before t43 that changes little. After it, XGBoost's F1 goes from 0.02–0.03
+to 0.35–0.36 and SAGE's from 0.02 to about 0.10 (the SAGE gains are significant by the paired-by-seed
+interval), but only late: F1 stays at 0.14 or below for four timesteps after the shutdown, because
+only 24, 24, 5 and 2 illicit units exist to learn from, and reaches 0.6–0.7 for XGBoost by t49. The
+ranking recovers before the threshold does: XGBoost's validation-chosen threshold falls from 0.9 to
+0.01 as the new pattern enters training. Local versus local-plus-graph features make no difference
+in either regime. This is an upper bound, with no label delay, on one event.
+
+![Fixed vs rolling F1](report/figures/elliptic_rolling_curves.png)
+
 **The label-free monitor did not warn before the collapse.** My first run with textbook thresholds
 (PSI ≥ 0.2, KS p < 0.01) flagged every test timestep from t38, because at 2,500–7,000 rows a batch those
 tests reject almost anything. Calibrating each detector on its own noise floor (the largest score
@@ -163,6 +175,8 @@ host memory alongside the sampler, so its rows come from a Kaggle P100 notebook.
 - **A domain-classifier detector is useless on Elliptic.** XGBoost told every test timestep apart
   from the reference window at ROC-AUC ≥ 0.99, before and after the shutdown, so it is saturated
   and never ran in the toolkit.
+- **Rolling refit is an upper bound.** It assumes labels arrive one timestep late; real labels take
+  longer, and its late thresholds are chosen on 29 to 60 illicit units.
 - **Not done:** a `temporal_inductive` regime on AMLworld (test accounts unseen in training), paired
   significance tests between configs, and drift injection with known typologies. Each is a few days.
 
@@ -205,7 +219,7 @@ uv sync
 uv run mulegraph smoke                                            # 10 s, synthetic graph, CI
 uv run mulegraph run   --config configs/elliptic_mvp.yaml         # 50 fits, ~9 min on an RTX 4060
 uv run mulegraph drift --config configs/elliptic_drift.yaml       # the headline figure, ~3.5 min
-uv run mulegraph run   --config configs/elliptic_rolling.yaml     # fixed vs rolling refit, ~1.5 h
+uv run mulegraph run   --config configs/elliptic_rolling.yaml     # fixed vs rolling refit, ~35 min
 uv run mulegraph run   --config configs/amlworld_hi_small.yaml    # see below
 uv run mlflow ui --backend-store-uri sqlite:///mlruns/mlflow.db
 ```

@@ -11,7 +11,7 @@
 # table still reports n_seeds = 5, not 5 x 12 steps.
 #
 # 20 fixed-window fits + 240 rolling refits (4 models x 5 seeds x 12 steps), about
-# 1.5h on an RTX 4060 — run it in the background.
+# 35 min on an RTX 4060 — run it in the background.
 
 dataset:
   name: elliptic_pp
