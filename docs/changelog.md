@@ -10,7 +10,10 @@ Portfolio release. The two-by-two benchmark runs end to end on both datasets, an
 
 The headline drift result is a negative one, reported as measured: on Elliptic's real t43 dark-market collapse (F1 0.85 → 0.02), no label-free detector gives warning once a flag must hold for two timesteps. PSI, KS and the score-shift detector never hold; the alert-rate detector peaks at t43 but recovers at t44. The event diagnosis (methods §12.5) says why, and the `temporal_rolling` regime (methods §12.6) measures what post-shift labels buy instead: post-t43 F1 0.02 → 0.35, and only from t47.
 
-Tagged on the merge of PR #37. Carries `report/exports/amlworld_hi_small_runs.csv` and `report/exports/mvp_elliptic_mvp_runs.csv`.
+Tagged on the merge of PR #38. Carries an MLflow export for every experiment it reports: `elliptic_mvp_runs.csv` (153 runs, 3 parents), `elliptic_rolling_runs.csv` (82), `elliptic_drift_runs.csv` (105), `amlworld_xgb_runs.csv` (20) and `amlworld_hi_small_runs.csv` (Kaggle), all under `report/exports/`.
+
+- **Fixed** a reproducibility gap (NFR-1): the reported Elliptic parent run `ba1e269a…` (§10.4) was in no committed export — `mvp_elliptic_mvp_runs.csv` holds two *other* parents, `341e0f93…` and `281caef1…`. The rolling, drift and AMLworld-XGBoost experiments had no export at all. `mvp_elliptic_mvp_runs.csv` is kept unchanged as the `mvp` tag's snapshot.
+- **Added** the export command to methods §10.4, so the rule at the top of this file is a command and not a habit. `amlworld_dev` is scratch and stays unexported.
 
 ### 20 Sep 2026 — README rewritten for a software-engineering audience
 - **Rewrote** `README.md` from a research log (~260 lines) to a ~180-line page: a 30-second summary, quickstart with real smoke output, an engineering section (architecture diagram, test-enforced integrity rules, three bugs), results next to published numbers and the leaky random split, and one drift figure. Detector tables, footnotes and the full "what didn't work" list stay in `docs/methods.md`.
