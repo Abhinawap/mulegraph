@@ -4,7 +4,16 @@ Project history, newest first. Add a dated entry for every tag and every change 
 
 ---
 
-## Unreleased
+## v1.0 — 21 Sep 2026
+
+Portfolio release. The two-by-two benchmark runs end to end on both datasets, and the answer is the same on each: graph *features* help, a graph *model* does not. XGBoost with causal GFP features beats GraphSAGE on Elliptic++ and on AMLworld HI-Small, every paired-by-seed interval excluding zero (methods §12.3).
+
+The headline drift result is a negative one, reported as measured: on Elliptic's real t43 dark-market collapse (F1 0.85 → 0.02), no label-free detector gives warning once a flag must hold for two timesteps. PSI, KS and the score-shift detector never hold; the alert-rate detector peaks at t43 but recovers at t44. The event diagnosis (methods §12.5) says why, and the `temporal_rolling` regime (methods §12.6) measures what post-shift labels buy instead: post-t43 F1 0.02 → 0.35, and only from t47.
+
+Tagged on the merge of PR #39, after #38 (the exports) and #40 (the hardware correction). It also ships `mulegraph score` (D5, below). Carries an MLflow export for every experiment it reports: `elliptic_mvp_runs.csv` (153 runs, 3 parents), `elliptic_rolling_runs.csv` (82), `elliptic_drift_runs.csv` (105), `amlworld_xgb_runs.csv` (20) and `amlworld_hi_small_runs.csv` (Kaggle), all under `report/exports/`.
+
+- **Fixed** a reproducibility gap (NFR-1): the reported Elliptic parent run `ba1e269a…` (§10.4) was in no committed export — `mvp_elliptic_mvp_runs.csv` holds two *other* parents, `341e0f93…` and `281caef1…`. The rolling, drift and AMLworld-XGBoost experiments had no export at all. `mvp_elliptic_mvp_runs.csv` is kept unchanged as the `mvp` tag's snapshot.
+- **Added** the export command to methods §10.4, so the rule at the top of this file is a command and not a habit. `amlworld_dev` is scratch and stays unexported.
 
 ### 21 Sep 2026 — `mulegraph score`: the deployed scoring path (D5)
 - **Added** `mulegraph score --config <yaml>`: one XGBoost model scores one batch and writes a ranked alert queue (account ids, top three TreeSHAP contributions per alert) and a label-free health check from the existing drift detectors. It exits 3 when a detector flags, so a scheduler can act on it. The model and its validation threshold are fitted once, cached under the dataset, feature and split hashes, and reused. Design D5, §3.4a; `configs/amlworld_score.yaml`.
@@ -14,16 +23,8 @@ Project history, newest first. Add a dated entry for every tag and every change 
 - **Split** `DriftConfig` into `DetectorConfig` (the detectors) and `DriftConfig` (adds the label-side lead-time rule), so `score` takes no field it would ignore.
 - **Tests** (`tests/test_score.py`): one threshold call on validation rows only (PR-E4); a second batch reuses the model; unlabelling the scored batch and fitting cold in a fresh directory leaves the threshold, queue and health file identical (PR-R2; a planted label leak fails it); a changed definition forces a refit; a shifted batch exits 3; and the config refuses SAGE, a batch outside the test window and a non-temporal regime, saying why.
 
-## v1.0 — 21 Sep 2026
-
-Portfolio release. The two-by-two benchmark runs end to end on both datasets, and the answer is the same on each: graph *features* help, a graph *model* does not. XGBoost with causal GFP features beats GraphSAGE on Elliptic++ and on AMLworld HI-Small, every paired-by-seed interval excluding zero (methods §12.3).
-
-The headline drift result is a negative one, reported as measured: on Elliptic's real t43 dark-market collapse (F1 0.85 → 0.02), no label-free detector gives warning once a flag must hold for two timesteps. PSI, KS and the score-shift detector never hold; the alert-rate detector peaks at t43 but recovers at t44. The event diagnosis (methods §12.5) says why, and the `temporal_rolling` regime (methods §12.6) measures what post-shift labels buy instead: post-t43 F1 0.02 → 0.35, and only from t47.
-
-Tagged on the merge of PR #38. Carries an MLflow export for every experiment it reports: `elliptic_mvp_runs.csv` (153 runs, 3 parents), `elliptic_rolling_runs.csv` (82), `elliptic_drift_runs.csv` (105), `amlworld_xgb_runs.csv` (20) and `amlworld_hi_small_runs.csv` (Kaggle), all under `report/exports/`.
-
-- **Fixed** a reproducibility gap (NFR-1): the reported Elliptic parent run `ba1e269a…` (§10.4) was in no committed export — `mvp_elliptic_mvp_runs.csv` holds two *other* parents, `341e0f93…` and `281caef1…`. The rolling, drift and AMLworld-XGBoost experiments had no export at all. `mvp_elliptic_mvp_runs.csv` is kept unchanged as the `mvp` tag's snapshot.
-- **Added** the export command to methods §10.4, so the rule at the top of this file is a command and not a habit. `amlworld_dev` is scratch and stays unexported.
+### 21 Sep 2026 — Kaggle hardware corrected: T4, not P100
+- **Fixed** the hardware named for the AMLworld SAGE run: it was a Kaggle **T4 x2** notebook, and the code uses one of the two GPUs (`device: cuda` on all 13 runs in `report/exports/amlworld_hi_small_runs.csv`; the export does not record the GPU model). README, methods §12.3, status, `kaggle/amlworld_sage.md` and one test comment said P100. No number changes. `v1.0` was moved to a commit that carries the corrected README.
 
 ### 20 Sep 2026 — README rewritten for a software-engineering audience
 - **Rewrote** `README.md` from a research log (~260 lines) to a ~180-line page: a 30-second summary, quickstart with real smoke output, an engineering section (architecture diagram, test-enforced integrity rules, three bugs), results next to published numbers and the leaky random split, and one drift figure. Detector tables, footnotes and the full "what didn't work" list stay in `docs/methods.md`.
@@ -31,8 +32,8 @@ Tagged on the merge of PR #38. Carries an MLflow export for every experiment it 
 - **Added** a limitation (methods §11): the AMLworld SAGE edge head is a lower bound, as transaction features never enter its message passing.
 - **Fixed** the stale drift caption that said PSI held a flag at t48; that flag went away at `ea5ecce`.
 
-### 20 Sep 2026 — AMLworld SAGE rows from the Kaggle P100 run
-- **Ran** `configs/amlworld_hi_small.yaml` on a Kaggle P100 from a clean clone at `87f1f5a` (12 fits, 1 h 14 min; SAGE fits 10–13 min each, every seed early-stopped at best epoch 3–5 of 10). XGBoost rows are identical to the laptop's `amlworld_xgb` run.
+### 20 Sep 2026 — AMLworld SAGE rows from the Kaggle T4 run
+- **Ran** `configs/amlworld_hi_small.yaml` on a Kaggle T4 (the notebook's T4 x2 accelerator; the code uses one of the two GPUs) from a clean clone at `87f1f5a` (12 fits, 1 h 14 min; SAGE fits 10–13 min each, every seed early-stopped at best epoch 3–5 of 10). XGBoost rows are identical to the laptop's `amlworld_xgb` run.
 - **Found** `sage.base` F1 0.052 ± 0.007 and `sage.base_gfp` 0.142 ± 0.031, against XGBoost's 0.209 and 0.539. Paired-by-seed F1 gaps: XGBoost − SAGE +0.157 on `base` and +0.397 on `base_gfp`, GFP − base within SAGE +0.090; every interval excludes zero. The ranking holds on the realistic test days 8–9 as well as over the laundering tail.
 - **Added** `report/tables/amlworld_hi_small_*`, `report/figures/amlworld_hi_small_curves.png` and the MLflow export `report/exports/amlworld_hi_small_runs.csv`. README, methods §12.3, status.
 
@@ -75,7 +76,7 @@ Tagged on the merge of PR #38. Carries an MLflow export for every experiment it 
 - **Added** the label-free drift monitor (`drift/detectors.py`, `drift/monitor.py`) and `mulegraph drift`: PSI and KS on features, KS on model scores, per batch against the validation reference; lead time against the F1 curve; `configs/elliptic_drift.yaml` (`d322082`; PR-R1–R4). Detector signatures are tested for the absence of labels.
 - **Added** AMLworld HI-Small as an edge task (`data/amlworld.py`; PR-D2): a unit is an edge, `batch_id` is the day, GFP rows are used per edge, splits and chronology run on `batch_id`, `configs/amlworld_hi_small.yaml` runs `xgb.base` and `xgb.base_gfp` on IBM's day 0–5 / 6–7 / 8–17 split (`a10c53c`). `dataset.max_days` truncates for a small host and is part of the cache key.
 - **Changed** the drift monitor after the first real run: with PSI ≥ 0.2 / KS p < 0.01 every Elliptic test timestep was flagged from t38. `drift.calibrate: true` sets each detector's threshold to its largest leave-one-out score inside the validation window; `drift.drop_run` makes the F1 drop persist for two batches (`df98d4f`). Result on `xgb.base_gfp`: PSI flags t39, KS t40, collapse t43 (lead 4 / 3); the score-shift detector fires only at t49.
-- **Added** `models/sage_edge.py`: GraphSAGE over accounts with a learned embedding and an edge head, trained and scored through `LinkNeighborLoader` with `time_attr` so a seed edge never samples a later edge (`5546a8d`; PR-M3, PR-F2). `configs/amlworld_hi_small.yaml` gains the two SAGE rows; `kaggle/amlworld_sage.md` runs the grid on a Kaggle P100.
+- **Added** `models/sage_edge.py`: GraphSAGE over accounts with a learned embedding and an edge head, trained and scored through `LinkNeighborLoader` with `time_attr` so a seed edge never samples a later edge (`5546a8d`; PR-M3, PR-F2). `configs/amlworld_hi_small.yaml` gains the two SAGE rows; `kaggle/amlworld_sage.md` runs the grid on a Kaggle GPU notebook (T4 x2; first written as P100, corrected 21 Sep 2026).
 - **Ran** AMLworld HI-Small XGBoost on the full data (8 min, 5.0 GB RSS): `xgb.base` F1 0.209 / PR-AUC 0.109, `xgb.base_gfp` F1 0.540 / PR-AUC 0.521 (`report/tables/amlworld_xgb_*`).
 - **Pinned** `matplotlib` as a direct dependency. `report/figures/` and the final tables are now tracked (smoke and dev outputs stay ignored).
 - **Repository made public.** The 13 dissertation-only GitHub issues were closed as not planned and the four milestones deleted.
