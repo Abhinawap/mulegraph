@@ -34,6 +34,12 @@ health:
   ks_alpha: 0.01
   calibrate: true
 
+# What the health check compares each day against: all history before the test window. Left
+# unset it is the validation window (days 6-7), whose two near-identical days make every flag
+# level tiny and flag every day; a wider window is slower (~3 min a day) and still flags the
+# day-10 laundering tail. Days 0-5 are training days, so their scores are in-sample (logged).
+reference: [0, 7]
+
 batch: 8          # the day to score; change it to score another day in the test window
 
 device: auto

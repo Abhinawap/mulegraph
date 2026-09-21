@@ -596,7 +596,7 @@ def run_score(cfg: ScoreConfig) -> tuple[Path, Path, list[str]]:
     device = resolve_device(cfg.device)
     commit = _stamp()
     regime = cfg.split.regimes[0]
-    assert regime.val is not None
+    assert regime.val is not None and regime.train_end is not None
     data = load_dataset(cfg.dataset, paths.data_dir)
     cache_dir = paths.cache_dir(cfg.dataset.name, cfg.dataset.version)
     # Causal by construction: the row for a unit at batch d sees only edges at or before d (PR-F2).
@@ -606,7 +606,16 @@ def run_score(cfg: ScoreConfig) -> tuple[Path, Path, list[str]]:
     model, fit = _deployed_model(cfg, data, feats, split, device, cache_dir, commit)
     threshold = fit["threshold"]
 
-    ref_batches = np.arange(regime.val[0], regime.val[1] + 1)
+    first, last = cfg.reference or regime.val
+    ref_batches = np.arange(first, last + 1)
+    if first <= regime.train_end:
+        log.warning(
+            "reference batches %d..%d reach into training batches (<= %d): the model scored "
+            "those in-sample, so the score-based detectors compare against fitted scores",
+            first,
+            last,
+            regime.train_end,
+        )
     # Every unit in the reference window and in this batch, labelled or not: the health
     # check sees what the deployed model sees, and no label reaches it (PR-R2).
     idx = np.flatnonzero(np.isin(data.batch_id, ref_batches) | (data.batch_id == cfg.batch))

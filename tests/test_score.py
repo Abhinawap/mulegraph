@@ -113,6 +113,32 @@ def test_a_second_batch_reuses_the_deployed_model(
     assert len(fits) == 2
 
 
+def test_a_longer_reference_changes_the_health_check_and_not_the_model(
+    score_cfg: ScoreConfig, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """D5: the reference window is a health-check setting; the fitted model and threshold stay."""
+    fits: list[int] = []
+    real = pipeline._fit_predict
+    monkeypatch.setattr(
+        pipeline, "_fit_predict", lambda *a, **k: (fits.append(1), real(*a, **k))[1]
+    )
+    _, default = _outputs(*pipeline.run_score(score_cfg)[:2])
+    wide = ScoreConfig.model_validate(_raw(reference=[3, 9]))
+    _, longer = _outputs(*pipeline.run_score(wide)[:2])
+
+    assert default["reference_batches"] == [7, 8]  # the validation window, when unset
+    assert longer["reference_batches"] == [3, 9]
+    assert len(fits) == 1
+    assert longer["threshold"] == default["threshold"]
+    assert longer["alerts"] == default["alerts"]
+
+
+def test_reference_must_lie_wholly_before_the_scored_batch() -> None:
+    for bad in ([7, BATCH], [8, 7], [9, 12]):
+        with pytest.raises(ValueError, match="come before batch"):
+            ScoreConfig.model_validate(_raw(reference=bad))
+
+
 def test_labels_of_the_scored_batch_change_nothing(
     score_cfg: ScoreConfig, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

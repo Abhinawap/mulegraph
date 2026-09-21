@@ -4,6 +4,23 @@ Project history, newest first. Add a dated entry for every tag and every change 
 
 ---
 
+## Unreleased
+
+### 21 Sep 2026 — A longer health-check reference for `mulegraph score`; README heading
+- **Added** `reference: [first, last]` to the score config: the batches the health check compares the scored day against. Unset it is the validation window, as before. It must be an ordered range wholly before `batch`, and a range reaching into training batches logs a warning (the model scored those in-sample). It is a health-check setting only: changing it never refits the model or moves the threshold (PR-E4), and no label reaches it (PR-R2). Design D5, §3.4a.
+- **Measured** on AMLworld, which detectors flag (F1 on those days is 0.38 on day 8 and 0.45 on day 9, so days 8 and 9 are ordinary; day 10 is the laundering tail, where ordinary traffic stops and 396 units remain):
+
+  | Reference | Day 8 | Day 9 | Day 10 |
+  |---|---|---|---|
+  | 6–7 (validation, the old default) | psi, ks, conf | all four | not run |
+  | 4–7 or 4–8 | ks | ks, alert | psi, conf, alert (4–9) |
+  | 2–7 | none | not run | not run |
+  | 0–7 (all history before the test window) | none | none | psi, conf, alert |
+
+  Wider windows raise every calibrated flag level (PSI 0.0002 → 1.6) and keep the response to the real event: on day 10 PSI is 8.7 against 1.6, and score shift and alert rate flag too. KS never flags day 10 (0.67 against 0.91): at 480k+ rows it rejects on almost every column, which is why it also flags ordinary days under narrow windows. The shipped `configs/amlworld_score.yaml` sets `reference: [0, 7]`; run through the CLI it exits 0 on days 8 and 9 and 3 on day 10. A day costs about 3 min (178 s, 6.2 GB peak) instead of 14 s, because calibration compares every reference day against the rest.
+- **Caveats, recorded as found.** The window was chosen after looking at days 8 to 10, the days it is judged on, so treat the table as a sensitivity check rather than a held-out result. Day 10 is the easiest event there is; quiet on days 8 and 9 and loud on day 10 says nothing about a subtle shift or about model failure, and the Elliptic result (methods §12.4, no detector warned of t43) is unchanged. Day 9's alert share is 2.6 times day 8's and is not flagged (0.84 against 0.94). Days 0–5 are training days, so their scores are in-sample; their alert shares (0.0004–0.0019) are not inflated against validation days (0.0007–0.0008), but that is one model on one dataset.
+- **Changed** the README heading "In 30 seconds" to "What I found".
+
 ## v1.0 — 21 Sep 2026
 
 Portfolio release. The two-by-two benchmark runs end to end on both datasets, and the answer is the same on each: graph *features* help, a graph *model* does not. XGBoost with causal GFP features beats GraphSAGE on Elliptic++ and on AMLworld HI-Small, every paired-by-seed interval excluding zero (methods §12.3).
