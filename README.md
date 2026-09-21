@@ -8,7 +8,7 @@ A command-line toolkit that tests money-laundering detection models the way a ba
 run them: trained on the past, scored on the future, with no leakage. It also checks whether a
 failing model can be caught before the labels arrive.
 
-## In 30 seconds
+## What I found
 
 - **Graph features cut an analyst's alert queue about 6×.** On 5 million simulated bank
   transactions, adding causal graph features (fan-in, fan-out, scatter-gather, computed only from

@@ -272,6 +272,8 @@ class ScoreConfig(Strict):
     split: SplitConfig
     model: ModelConfig
     health: DetectorConfig = Field(default_factory=DetectorConfig)
+    #: Batches the health check compares against; the validation window when unset (D5).
+    reference: tuple[int, int] | None = None
     #: The batch to score; it must fall in the regime's test window, after the reference.
     batch: int
     device: Literal["auto", "cuda", "cpu"] = "auto"
@@ -295,6 +297,11 @@ class ScoreConfig(Strict):
             raise ValueError(
                 f"batch {self.batch} must fall in the test window {test}, after the "
                 "validation window the threshold and the health reference come from (PR-E4)"
+            )
+        if self.reference is not None and not self.reference[0] <= self.reference[1] < self.batch:
+            raise ValueError(
+                f"reference {list(self.reference)} must be an ordered range of batches that all "
+                f"come before batch {self.batch}: the health check compares today against the past"
             )
         return self
 
