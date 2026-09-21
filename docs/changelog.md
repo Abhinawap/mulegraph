@@ -4,7 +4,11 @@ Project history, newest first. Add a dated entry for every tag and every change 
 
 ---
 
-## Unreleased
+## v1.2 — 21 Sep 2026
+
+`mulegraph score` and `mulegraph smoke` now write a static HTML report for each scored batch, beside the alert queue and health file: a banner saying whether a detector flagged the day, each detector's score against its flag level, the top 25 alerts with the features behind each, and the provenance. It is one self-contained page with no scripts and nothing loaded from outside. The rendered layout was not looked at in a browser before this tag (none was available), only its structure, its figure and its tests; see the entry below.
+
+Tagged on the merge that adds this section. No new MLflow experiment and no new benchmark result: the exports and numbers listed under `v1.0` and `v1.1` are the ones this tag carries.
 
 ### 21 Sep 2026 — A static HTML report for every scored batch
 - **Added** `report/html.py` and a third output of `mulegraph score`: `<name>_batch<d>_report.html`, one self-contained page (no scripts, nothing loaded from outside, the figure embedded) with a banner saying whether a detector flagged the day, each detector's score beside its flag level as a figure and a table, the top 25 alerts, and the provenance (scored-at and fitted-at commits, threshold, reference window, dataset, feature and split hashes). The caution from the health file, that no flag is not an all-clear, is on the page. `score` and `smoke` now print the report's path; `run_score` returns it as its third value. Design D5, §3.4a.
