@@ -312,11 +312,22 @@ If the working tree has uncommitted changes, the pipeline stamps every run's com
 | First tagged run | `341e0f93709f487187f8ca276ff60d6a` at `ec4501f`, tag `mvp`; XGBoost rows identical, SAGE rows within GPU nondeterminism |
 | Superseded first run | `281caef1ade34e42aecd51bf2ab1e8a8` at `a64a16e` (unscaled SAGE inputs) |
 | Results table | `report/tables/elliptic_mvp_results.csv`, committed |
-| Committed export | `report/exports/mvp_elliptic_mvp_runs.csv`, all 102 runs of both parents (`d16baab`) |
+| Committed export | `report/exports/elliptic_mvp_runs.csv`, all 153 runs of all three parents, including the reported `ba1e269a…`. `report/exports/mvp_elliptic_mvp_runs.csv` is the narrower `mvp`-tag snapshot (102 runs of two parents, `d16baab`) and is kept as tagged |
 | Feature version | `d6e912c8fcb83f3b` |
 | Split hashes | random `408c823763f1f17f`; temporal `f576c23d95a59084` |
 
 To regenerate: check out `mvp`, run `uv sync`, place the three Elliptic++ 2023.1 CSVs in `data/raw/elliptic_pp/2023.1/`, and run `uv run mulegraph run --config configs/elliptic_mvp.yaml`. A run from the tag stamps the tagged merge commit. XGBoost rows reproduce exactly; SAGE rows reproduce within GPU nondeterminism, which is the whole difference between the `mvp` run and the `afe6ef5` run in §12.2.
+
+Every experiment a tag reports is exported to `report/exports/<experiment>_runs.csv` from the local tracking database:
+
+```bash
+uv run python -c "
+import mlflow; mlflow.set_tracking_uri('sqlite:///mlruns/mlflow.db')
+for name in ['elliptic_mvp', 'elliptic_rolling', 'elliptic_drift', 'amlworld_xgb']:
+    mlflow.search_runs(experiment_names=[name]).to_csv(f'report/exports/{name}_runs.csv', index=False)"
+```
+
+`amlworld_hi_small_runs.csv` comes from the Kaggle database instead (`kaggle/amlworld_sage.md`). The `amlworld_dev` experiment is scratch work and is not exported.
 
 ## 11. Limitations
 
