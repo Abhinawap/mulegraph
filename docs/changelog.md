@@ -4,7 +4,11 @@ Project history, newest first. Add a dated entry for every tag and every change 
 
 ---
 
-## Unreleased
+## v1.1 — 21 Sep 2026
+
+`mulegraph score` becomes usable. In `v1.0` its health check flagged every AMLworld test day, so exit status 3 carried no signal there. `v1.1` adds a configurable health-check reference window (`reference: [0, 7]` in `configs/amlworld_score.yaml`): it exits 0 on days 8 and 9 and 3 on day 10, the laundering tail. The window was chosen after looking at those days, so that is a sensitivity check, not a held-out result, and day 10 is the easiest drift there is; the Elliptic result (no detector warned of t43) is unchanged. `mulegraph smoke` now also scores a batch, so CI exercises the score path, and the README opens with what `score` does, with real day-8 and day-10 outputs committed under `report/tables/`.
+
+Tagged on the merge that adds this section. No new MLflow experiment: `score` writes files rather than runs (D5), so the exports listed under `v1.0` are the ones this tag carries.
 
 ### 21 Sep 2026 — README leads with `mulegraph score`
 - **Changed** the README to open with what the tool does for a user: a new "What it does" section above "What I found" shows a real day-8 alert queue (top three rows with the features behind each alert) and the health check on day 8 (exit 0) and day 10 (exit 3), with the limits stated beside it: simulator data, day 10 is the easiest drift there is, and the reference window was chosen after seeing those days. The tagline now describes the score command first and the benchmark second, and the run list gains the `score` line.
