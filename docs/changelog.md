@@ -6,6 +6,10 @@ Project history, newest first. Add a dated entry for every tag and every change 
 
 ## Unreleased
 
+### 21 Sep 2026 — `.env.example` lists only what the code reads
+- **Trimmed** `.env.example` from 54 lines to 18: the five variables the code reads (`MULEGRAPH_DATA_DIR`, `MULEGRAPH_REPORT_DIR`, `MLFLOW_TRACKING_URI`, `MULEGRAPH_DEVICE`, `MULEGRAPH_LOG_LEVEL`) with their real defaults. Removed the Kaggle credential slots (nothing downloads; the README says to place the files by hand, and an empty key slot in a committed file invites pasting one in), and the GPU, thread, cuBLAS and hash-seed lines, which nothing documented exporting. `MULEGRAPH_DEVICE` is now commented out: set to `cuda`, as before, it overrode every config on a machine without a GPU. The header says the file must be exported; nothing loads it.
+- **Removed** `os.environ["PYTHONHASHSEED"] = ...` from `seed_all`: the variable only takes effect when set before Python starts, and the code spawns no Python child processes (loaders run with `num_workers=0`), so it did nothing.
+
 ### 21 Sep 2026 — Ponytail audit cuts
 - **Removed** the `temporal_inductive` regime. The config accepted it and `build_split` refused it every time, on every dataset: accepted-but-ignored scaffolding. Design §1 already listed it as out of scope; methods §2 now says three regimes, and why an inductive regime would add nothing on Elliptic. A config that still asks for it fails at validation with the three valid regimes named, rather than with the old dataset-specific reason. Three tests went with it.
 - **Removed** the `temp_cycle` feature family from the config schema: no config used it. The GFP driver still passes every snapml family explicitly (temp-cycle off), so the feature output and every recorded `feature_version` are unchanged.
