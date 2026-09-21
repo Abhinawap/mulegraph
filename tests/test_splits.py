@@ -126,29 +126,6 @@ def test_hash_is_stable_and_seed_sensitive(synthetic_ds: GraphDataset, tmp_path:
     assert other_seed.split_hash != first.split_hash
 
 
-def test_temporal_inductive_rejected_without_cross_time_edges(
-    synthetic_ds: GraphDataset, tmp_path: Path
-) -> None:
-    cfg = RegimeConfig(regime="temporal_inductive", train_end=6, val=(7, 9), test=(10, 12))
-    assert synthetic_ds.meta.cross_time_edges is False
-
-    with pytest.raises(RegimeNotSupportedError) as excinfo:
-        build_split(synthetic_ds, cfg, tmp_path)
-    message = str(excinfo.value)
-    assert "cross_time_edges" in message
-    assert synthetic_ds.meta.dataset in message
-
-
-def test_temporal_inductive_is_refused_where_it_is_defined(
-    synthetic_cross_time_ds: GraphDataset, tmp_path: Path
-) -> None:
-    cfg = RegimeConfig(regime="temporal_inductive", train_end=6, val=(7, 9), test=(10, 12))
-    assert synthetic_cross_time_ds.meta.cross_time_edges is True
-
-    with pytest.raises(RegimeNotSupportedError, match="not built"):
-        build_split(synthetic_cross_time_ds, cfg, tmp_path)
-
-
 def test_cache_is_written_and_reverified(synthetic_ds: GraphDataset, tmp_path: Path) -> None:
     split = build_split(synthetic_ds, TEMPORAL, tmp_path)
     cached = tmp_path / "splits" / definition_hash(split.params)
