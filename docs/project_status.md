@@ -9,7 +9,8 @@
 - [x] Tag `v1.0` — cut 21 Sep 2026 on the merge of PR #37.
 - [x] `mulegraph score`: deployed scoring with an alert queue and a label-free health check (D5).
 - [x] The health check flagged every AMLworld test day with its two-day reference. `reference: [0, 7]` fixes that on days 8 and 9 and still flags day 10 (changelog, 21 Sep 2026); the window was chosen after seeing those days, so it is a sensitivity check, not a held-out result.
-- [ ] README leads with `mulegraph score`; static HTML report per scored batch; hero figure of a laundering subgraph.
+- [x] README leads with `mulegraph score` (21 Sep 2026).
+- [ ] Static HTML report per scored batch; hero figure of a laundering subgraph. Both optional polish.
 
 What is done and when is in [changelog.md](changelog.md).
 

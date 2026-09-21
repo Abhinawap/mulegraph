@@ -1,0 +1,53 @@
+{
+  "batch": 10,
+  "status": "drift_flagged",
+  "flagged": [
+    "psi",
+    "conf",
+    "alert"
+  ],
+  "detectors": [
+    {
+      "detector": "psi",
+      "score": 8.74429669297728,
+      "flag_at": 1.6461890815625586
+    },
+    {
+      "detector": "ks",
+      "score": 0.6744186046511628,
+      "flag_at": 0.9069767441860465
+    },
+    {
+      "detector": "conf",
+      "score": 0.7372285872358835,
+      "flag_at": 0.10118086969240336
+    },
+    {
+      "detector": "alert",
+      "score": 5.993143525184219,
+      "flag_at": 0.9373251290991416
+    }
+  ],
+  "reference_batches": [
+    0,
+    7
+  ],
+  "units_scored": 396,
+  "alerts": 136,
+  "threshold": 0.9914626479148865,
+  "commit": "b584125",
+  "model_fit": {
+    "threshold": 0.9914626479148865,
+    "val_f1": 0.45164960182025027,
+    "commit": "1552c5d-dirty",
+    "dataset_version": "hi_small",
+    "feature_version": "1ab79445f22e0ead",
+    "split_hash": "4291111f6dd26015",
+    "model": "xgb.base_gfp",
+    "params": {},
+    "seed": 0,
+    "device": "cuda",
+    "xgboost": "3.2.0"
+  },
+  "note": "no flag is not an all-clear: on Elliptic's t43 shutdown F1 fell to 0.02 while no detector held a flag for two batches (docs/methods.md \u00a712.4-12.5)"
+}

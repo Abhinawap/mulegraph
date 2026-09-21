@@ -1,0 +1,49 @@
+{
+  "batch": 8,
+  "status": "no_drift_flagged",
+  "flagged": [],
+  "detectors": [
+    {
+      "detector": "psi",
+      "score": 0.8173655077335306,
+      "flag_at": 1.6461890815625586
+    },
+    {
+      "detector": "ks",
+      "score": 0.7441860465116279,
+      "flag_at": 0.9069767441860465
+    },
+    {
+      "detector": "conf",
+      "score": 0.06940104411449266,
+      "flag_at": 0.10118086969240336
+    },
+    {
+      "detector": "alert",
+      "score": 0.054361815743911635,
+      "flag_at": 0.9373251290991416
+    }
+  ],
+  "reference_batches": [
+    0,
+    7
+  ],
+  "units_scored": 654467,
+  "alerts": 466,
+  "threshold": 0.9914626479148865,
+  "commit": "b584125",
+  "model_fit": {
+    "threshold": 0.9914626479148865,
+    "val_f1": 0.45164960182025027,
+    "commit": "1552c5d-dirty",
+    "dataset_version": "hi_small",
+    "feature_version": "1ab79445f22e0ead",
+    "split_hash": "4291111f6dd26015",
+    "model": "xgb.base_gfp",
+    "params": {},
+    "seed": 0,
+    "device": "cuda",
+    "xgboost": "3.2.0"
+  },
+  "note": "no flag is not an all-clear: on Elliptic's t43 shutdown F1 fell to 0.02 while no detector held a flag for two batches (docs/methods.md \u00a712.4-12.5)"
+}
