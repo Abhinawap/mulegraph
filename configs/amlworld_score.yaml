@@ -1,0 +1,39 @@
+# Deployed scoring on AMLworld HI-Small: the day's alert queue plus a label-free health check (D5).
+#
+#   uv run mulegraph score --config configs/amlworld_score.yaml    # first call fits (~3 min), later calls reuse
+#
+# Exit status 0 = scored, no health flag; 3 = scored, a detector flagged the day; 1 = error.
+# Dataset, features and split match configs/amlworld_xgb.yaml, so its feature cache is reused.
+
+name: amlworld
+
+dataset:
+  name: amlworld
+  version: hi_small
+
+features:
+  families: [fan, degree, scatter_gather]
+  bins: [2, 4, 8, 16, 32]
+  window: 24
+  cycle_len: 10
+  vertex_stats: true
+  num_threads: 8
+
+split:
+  regimes:
+    - regime: temporal
+      train_end: 5
+      val: [6, 7]
+      test: [8, 17]
+
+model: {name: xgb, features: base_gfp}
+
+health:
+  detectors: [psi, ks, conf, alert]
+  bins: 10
+  ks_alpha: 0.01
+  calibrate: true
+
+batch: 8          # the day to score; change it to score another day in the test window
+
+device: auto

@@ -30,7 +30,7 @@ A data scientist on a bank or payment firm's financial-crime team who has a tran
 
 ### Deliberately out of scope
 
-Real bank data. Retraining policies beyond one rolling refit with zero label lag (`temporal_rolling`, PR-E7). Injected typology-shift events. PNA / GIN+EU via IBM's Multi-GNN code (its published configuration needs more than 8 GB of GPU memory; see [project_status.md](project_status.md)). The `temporal_inductive` regime. Transfer learning across datasets. Dashboards, web UI, cloud deployment. LLM components. Oversampling on graphs. Random-split-only results, or accuracy as a headline metric. Any claim that synthetic results generalise to real transactions.
+Real bank data. Retraining policies beyond one rolling refit with zero label lag (`temporal_rolling`, PR-E7). Injected typology-shift events. PNA / GIN+EU via IBM's Multi-GNN code (its published configuration needs more than 8 GB of GPU memory; see [project_status.md](project_status.md)). The `temporal_inductive` regime. Transfer learning across datasets. Dashboards, web UI, HTTP serving, cloud deployment (the deployed-scoring path is a CLI command writing files, D5). LLM components. Oversampling on graphs. Random-split-only results, or accuracy as a headline metric. Any claim that synthetic results generalise to real transactions.
 
 ---
 
@@ -42,6 +42,7 @@ Real bank data. Retraining policies beyond one rolling refit with zero label lag
 | **D2 Reference configuration** | No hyperparameter search. Every model runs its **fixed reference configuration** ("trial 0"): XGBoost library defaults with `scale_pos_weight` and early stopping on validation PR-AUC; a 2-layer 64-unit GraphSAGE. Every run logs `trials_completed = 0` and `trial0_source`. | Results compare untuned reference models under one protocol. A tuned comparison would need an equal wall-clock budget per model, which was not run. |
 | **D3 Feature × model** | The lineup is a **two-by-two**: {base, base + GFP} × {XGBoost, GraphSAGE}. **What "base" means differs by dataset and is stated:** on **Elliptic**, the published 165-feature block is 93 *local* features plus 72 *one-hop aggregated neighbour* features, so `base = local` (93) and the full block is a separate `xgb.raw165` reference row; on **AMLworld**, `base = raw` transaction fields (amount, currency, payment format, hour of day), which contain no neighbour aggregates. | The feature gap (base vs base + GFP) measures added graph information cleanly on both datasets. On Elliptic, `sage.base` vs `xgb.base` is the cleanest model-effect comparison (SAGE's message passing does the one-hop aggregation the 72 features hard-code), and `xgb.raw165` shows how much of GFP's gain the published aggregates already capture. |
 | **D4 Batch unit** | One Elliptic timestep (~2 weeks) on Elliptic. One **day** on AMLworld (`batch_id = hour // 24`), matching IBM's own Multi-GNN split of days 0–5 / 6–7 / 8–17; GFP causality runs at hour granularity. | Per-timestep curves, split bounds and drift batches all use `batch_id`. On Elliptic `batch_id == node_time`. The drift reference window is the validation batches; every later batch is scored against it. Lead time is expressed in the dataset's batch unit. |
+| **D5 Deployed scoring** | `mulegraph score` runs one fitted XGBoost model on one batch, as a bank would each day: a ranked alert queue with each alert's top TreeSHAP contributions, plus the drift detectors as a label-free health check. The model and its validation threshold are fitted once and cached under a key of dataset version, feature version, split hash, model, params, resolved device and XGBoost version, then reused; the fit's commit and definition go into every health file as `model_fit`. XGBoost only: a GNN scores through the whole graph and has no saved model to carry from one day to the next. | The benchmark's integrity rules hold on the product path: the threshold comes from validation (PR-E4), no label reaches scoring or the health check (PR-R2), and features for batch *d* see only edges at or before *d* (PR-F2), because the cached causal features are the "as of *d*" rows. Exit status 3 when a detector flags, so a scheduler can act on it. A clean check is not an all-clear, and every health file says so (methods §12.5). Dashboards, HTTP and cloud stay out of scope. |
 
 ---
 
@@ -114,6 +115,13 @@ Every component depends only on the shared types in `mulegraph/types.py` (`Graph
 5. With `drift.event` set, the labelled test units are split at that batch. For each side the run records prevalence, the fitted model's ROC-AUC, recall at the validation threshold and median illicit score, plus a probe: 5-fold stratified CV ROC-AUC of XGBoost library defaults refit inside that window alone. A probe near 1 where transfer fails means the event changed what illicit looks like rather than making it unlearnable. The probe's folds are random within the window, so it measures separability, never deployment performance.
 6. Outputs: `report/tables/<experiment>_scores.csv`, `<experiment>_lead_time.csv`, `<experiment>_event.csv` (with `drift.event`), `report/figures/<experiment>_drift.png`, all logged as artifacts.
 
+### 3.4a Scoring run (`mulegraph score`, D5)
+
+1. One temporal regime, one XGBoost model, one seed, one `batch` inside the test window (validated, with the reason in the error).
+2. Load, causal features and split as in the benchmark. The model and threshold are read from `<cache>/models/<key>.ubj` and `.json`, or fitted with the benchmark's own fit-and-threshold step and written there. The threshold file is written last, so a crash between the two files forces a refit.
+3. The model scores every unit in the validation window and in `batch`, labelled or not. The detectors of §3.4 step 3 compare `batch` against the validation window.
+4. Outputs, no MLflow run: `report/tables/<name>_batch<d>_alerts.csv` (rank, unit, score, account or node ids, top contributing features, only rows at or above the threshold) and `<name>_batch<d>_health.json` (status, each detector's score and flag level, counts, threshold, commit, dataset and feature versions, split hash). Exit 0 = no flag, 3 = a detector flagged, 1 = error.
+
 ### 3.5 Storage and schemas
 
 ```
@@ -149,6 +157,7 @@ data/
 |---|---|
 | `mulegraph run --config <yaml>` | Full benchmark run |
 | `mulegraph drift --config <yaml>` | Fit, then run label-free detectors and report lead time |
+| `mulegraph score --config <yaml>` | Score one batch with the deployed model: alert queue plus label-free health check (D5) |
 | `mulegraph smoke` | Ten-second end-to-end check on a synthetic graph (used in CI) |
 
 ```python

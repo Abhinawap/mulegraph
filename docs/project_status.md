@@ -7,6 +7,9 @@
 ## Still open
 
 - [x] Tag `v1.0` — cut 21 Sep 2026 on the merge of PR #37.
+- [x] `mulegraph score`: deployed scoring with an alert queue and a label-free health check (D5).
+- [ ] The health check flags every AMLworld test day: its reference is the two-day validation window (see Verified method notes). Decide whether the reference window may be longer than the validation window.
+- [ ] README leads with `mulegraph score`; static HTML report per scored batch; hero figure of a laundering subgraph.
 
 What is done and when is in [changelog.md](changelog.md).
 
@@ -28,6 +31,7 @@ Facts that constrain the code, verified on fixtures and kept here instead of in 
 - **A domain-classifier detector is saturated on Elliptic** (same probe). XGBoost defaults separate every test timestep from the reference window at ROC-AUC ≥ 0.99, t38 to t49 alike, so the two-sample-classifier test (Lopez-Paz and Oquab 2017) cannot single out t43; not added.
 - **The alert rate is the only detector that peaks at t43** (`drift/detectors.py`, `ea5ecce`; run `7a19cb9`). XGBoost's share of alerts falls from 4.4% to 1.5% at t43 (score 1.34 against a calibrated flag of 0.38) and recovers at t44 because the model fires on the wrong units, so it never holds. Its t38–39 flags are alerts rising with the illicit share.
 - **snapml sets flush-to-zero for the process** (`drift/detectors.py`, `ea5ecce`). After `import snapml`, `5e-324 + 0.0 == 0.0`, so a subnormal PSI cut above a constant reference value collapsed onto it and PSI was blind to shifts in constant columns on every real run. PSI bins are (a, b] at every distinct reference quantile but the maximum; the regression test imports snapml first. Anything else that relies on subnormal arithmetic after the feature builder has run is suspect.
+- **The AMLworld health check cannot stay quiet with a two-day reference** (`mulegraph score`, D5). Calibration takes each detector's leave-one-out maximum inside the reference window; with days 6–7 that is one comparison of two near-identical days, so the flag levels are tiny (PSI 0.0002, score-shift KS 0.0025). KS on ~650k rows per day rejects for almost any column. Days 8 and 9 both flag on PSI, KS and score shift, and day 9 on alert rate too. The scores themselves are right: F1 recomputed from the day-8 and day-9 alert queues matches the benchmark to four decimals.
 - **Threshold ties go to the higher threshold** (`eval/threshold.py`): same F1, fewer alerts.
 - **Two intervals, never pooled** (`eval/intervals.py`, PR-E3). The across-seed t-interval (n = 5; a normal interval would be ~⅓ too narrow) is the only basis for significance. A bootstrap over test ids is narrow regardless of training instability and is used only for per-timestep bands.
 - **`p_at_r*` are curve metrics.** They take the highest-threshold PR point that reaches the target recall and never set the deployed threshold.

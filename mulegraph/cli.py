@@ -96,5 +96,38 @@ def drift(config: ConfigOption) -> None:
     typer.secho(f"lead-time table: {table}", fg=typer.colors.GREEN)
 
 
+#: ``score`` exit status when a health detector flags the batch; 1 is an error, 2 a usage error.
+EXIT_DRIFT = 3
+
+
+@app.command()
+def score(config: ConfigOption) -> None:
+    """Score one batch: a ranked alert queue and a label-free health check. Exits 3 on a flag."""
+    from mulegraph.config import ScoreConfig, load_config
+    from mulegraph.pipeline import run_score
+
+    try:
+        cfg = load_config(config, ScoreConfig)
+    except FileNotFoundError as exc:
+        _fail(str(exc))
+    except ValueError as exc:
+        _fail(f"Invalid config {config}: {exc}")
+
+    try:
+        alerts, health, flagged = run_score(cfg)
+    except (FileNotFoundError, ValueError) as exc:
+        _fail(str(exc))
+
+    typer.secho(f"alerts: {alerts}\nhealth: {health}", fg=typer.colors.GREEN)
+    if flagged:
+        typer.secho(
+            f"drift flagged on batch {cfg.batch} by {', '.join(flagged)}; the scores may not "
+            "be trustworthy, see the health file",
+            fg=typer.colors.YELLOW,
+            err=True,
+        )
+        raise typer.Exit(EXIT_DRIFT)
+
+
 if __name__ == "__main__":  # pragma: no cover
     app()

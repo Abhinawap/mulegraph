@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import logging
 import math
 import os
@@ -9,11 +10,12 @@ import shutil
 import tempfile
 from dataclasses import dataclass
 from pathlib import Path
+from typing import TYPE_CHECKING, Any
 
 import numpy as np
 import pandas as pd
 
-from mulegraph.config import DriftRunConfig, ModelConfig, RunConfig, load_config
+from mulegraph.config import DriftRunConfig, ModelConfig, RunConfig, ScoreConfig, load_config
 from mulegraph.data import load_dataset
 from mulegraph.drift.monitor import lead_time, score_batches
 from mulegraph.eval.curves import CURVE_METRICS, per_timestep
@@ -29,6 +31,9 @@ from mulegraph.report.tables import write_results_table
 from mulegraph.splits.builder import build_split, rolling_steps
 from mulegraph.types import FeatureMatrix, GraphDataset, Predictions, Split
 from mulegraph.util import Paths, git_commit, git_dirty, hash_dict, resolve_device, seed_all
+
+if TYPE_CHECKING:
+    from mulegraph.models.xgb import XGBModel
 
 log = logging.getLogger("mulegraph")
 
@@ -305,7 +310,11 @@ def _prepare(cfg: RunConfig) -> tuple[Paths, str, str, str]:
     mlflow.set_tracking_uri(tracking_uri)
     mlflow.set_experiment(cfg.mlflow.experiment)
 
-    device = resolve_device(cfg.device)
+    return paths, tracking_uri, resolve_device(cfg.device), _stamp()
+
+
+def _stamp() -> str:
+    """The commit this run's outputs are stamped with, ``-dirty`` on an uncommitted tree."""
     commit = git_commit()
     if git_dirty():
         # The stamp has to carry what the warning says: a log line vanishes, and a
@@ -316,7 +325,7 @@ def _prepare(cfg: RunConfig) -> tuple[Paths, str, str, str]:
             "tagged commit, so its runs are stamped %s (NFR-1)",
             commit,
         )
-    return paths, tracking_uri, device, commit
+    return commit
 
 
 def run_benchmark(cfg: RunConfig, config_path: Path) -> Path:
@@ -534,6 +543,152 @@ def run_drift(cfg: DriftRunConfig, config_path: Path) -> Path:
             mlflow.log_artifact(str(artifact))
     log.info("wrote %s and %s", score_path, lead_path)
     return lead_path
+
+
+def _deployed_model(
+    cfg: ScoreConfig,
+    data: GraphDataset,
+    feats: FeatureMatrix,
+    split: Split,
+    device: str,
+    cache_dir: Path,
+    commit: str,
+) -> tuple[XGBModel, dict[str, Any]]:
+    """Fit once and threshold on validation (PR-E4); reuse both until a definition changes."""
+    import xgboost
+
+    from mulegraph.models.xgb import XGBModel
+
+    definition = {
+        "dataset_version": data.meta.version,
+        "feature_version": feats.feature_version,
+        "split_hash": split.split_hash,
+        "model": cfg.model.key,
+        "params": cfg.model.params,
+        "seed": 0,
+        # GPU and CPU hist grow different trees, and a library upgrade may too.
+        "device": device,
+        "xgboost": xgboost.__version__,
+    }
+    model_path = cache_dir / "models" / f"{hash_dict(definition)}.ubj"
+    meta_path = model_path.with_suffix(".json")
+    if model_path.is_file() and meta_path.is_file():
+        log.info("reusing deployed model %s", model_path)
+        return XGBModel.load(model_path), json.loads(meta_path.read_text())
+
+    # Gone before the refit, so a crash can never pair a new booster with an old threshold.
+    meta_path.unlink(missing_ok=True)
+    model, _, threshold, val_f1, _, _ = _fit_predict(data, feats, split, cfg.model, 0, device)
+    assert isinstance(model, XGBModel)
+    model_path.parent.mkdir(parents=True, exist_ok=True)
+    model.save(model_path)
+    # The health file is the only record of a score run, so the fit's provenance lives here
+    # (NFR-1): the commit that fitted the model, not the one that later scores with it.
+    meta = {"threshold": threshold, "val_f1": val_f1, "commit": commit, **definition}
+    meta_path.write_text(json.dumps(meta, indent=2) + "\n")
+    log.info("deployed model %s, validation threshold %.4f", model_path, threshold)
+    return model, meta
+
+
+def run_score(cfg: ScoreConfig) -> tuple[Path, Path, list[str]]:
+    """Score one batch: a ranked alert queue and a label-free health check (D5, PR-R2)."""
+    paths = Paths.from_env()
+    device = resolve_device(cfg.device)
+    commit = _stamp()
+    regime = cfg.split.regimes[0]
+    assert regime.val is not None
+    data = load_dataset(cfg.dataset, paths.data_dir)
+    cache_dir = paths.cache_dir(cfg.dataset.name, cfg.dataset.version)
+    # Causal by construction: the row for a unit at batch d sees only edges at or before d (PR-F2).
+    gfp = build_features(data, cfg.features, cache_dir) if cfg.needs_gfp else None
+    feats = select_features(data, gfp, cfg.model.features)
+    split = build_split(data, regime, cache_dir)
+    model, fit = _deployed_model(cfg, data, feats, split, device, cache_dir, commit)
+    threshold = fit["threshold"]
+
+    ref_batches = np.arange(regime.val[0], regime.val[1] + 1)
+    # Every unit in the reference window and in this batch, labelled or not: the health
+    # check sees what the deployed model sees, and no label reaches it (PR-R2).
+    idx = np.flatnonzero(np.isin(data.batch_id, ref_batches) | (data.batch_id == cfg.batch))
+    batch = data.batch_id[idx]
+    today = batch == cfg.batch
+    if not today.any():
+        raise ValueError(f"batch {cfg.batch} has no {data.task}s in {data.meta.dataset} to score")
+    proba = model.predict_proba(data, feats, idx)
+    h = cfg.health
+    health = score_batches(
+        feats.values[idx],
+        proba,
+        batch,
+        ref_batches,
+        detectors=h.detectors,
+        bins=h.bins,
+        psi_flag=h.psi_flag,
+        ks_alpha=h.ks_alpha,
+        ks_frac_flag=h.ks_frac,
+        conf_flag=h.conf_flag,
+        alert_flag=h.alert_flag,
+        threshold=threshold,
+        calibrate=h.calibrate,
+    )
+
+    units, scores = idx[today], proba[today]
+    order = np.argsort(-scores, kind="stable")
+    order = order[scores[order] >= threshold]
+    alerted = units[order]
+    alerts = pd.DataFrame(
+        {"rank": np.arange(1, alerted.size + 1), "unit": alerted, "score": scores[order]}
+    )
+    if data.task == "edge":
+        alerts["src_account"] = data.node_ids[data.src[alerted]]
+        alerts["dst_account"] = data.node_ids[data.dst[alerted]]
+    else:
+        alerts["node_id"] = data.node_ids[alerted]
+    if alerted.size:
+        # The features that pushed each alert toward illicit, largest first.
+        contrib = model.contributions(feats, alerted)
+        top = np.argsort(-contrib, axis=1)[:, :3]
+        alerts["top_features"] = [
+            "; ".join(f"{feats.columns[j]} {contrib[i, j]:+.2f}" for j in row)
+            for i, row in enumerate(top)
+        ]
+
+    flagged = health.loc[health["flagged"], "detector"].tolist()
+    tables_dir = paths.tables_dir()
+    tables_dir.mkdir(parents=True, exist_ok=True)
+    stem = f"{cfg.name}_batch{cfg.batch}"
+    alerts_path = tables_dir / f"{stem}_alerts.csv"
+    health_path = tables_dir / f"{stem}_health.json"
+    alerts.to_csv(alerts_path, index=False)
+    report = {
+        "batch": cfg.batch,
+        "status": "drift_flagged" if flagged else "no_drift_flagged",
+        "flagged": flagged,
+        "detectors": [
+            {"detector": r.detector, "score": r.score, "flag_at": r.threshold}
+            for r in health.itertuples(index=False)
+        ],
+        "reference_batches": [int(ref_batches[0]), int(ref_batches[-1])],
+        "units_scored": int(today.sum()),
+        "alerts": int(alerted.size),
+        "threshold": threshold,
+        "commit": commit,
+        "model_fit": fit,
+        # A clean check is evidence, not an all-clear; every health file says so (D5).
+        "note": "no flag is not an all-clear: on Elliptic's t43 shutdown F1 fell to 0.02 "
+        "while no detector held a flag for two batches (docs/methods.md §12.4-12.5)",
+    }
+    health_path.write_text(json.dumps(report, indent=2) + "\n")
+    log.info(
+        "batch %d: %d %ss scored, %d alerts at threshold %.4f, health %s",
+        cfg.batch,
+        report["units_scored"],
+        data.task,
+        report["alerts"],
+        threshold,
+        report["status"],
+    )
+    return alerts_path, health_path, flagged
 
 
 def run_smoke(keep: bool = False) -> Path:

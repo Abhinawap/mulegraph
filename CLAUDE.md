@@ -14,8 +14,8 @@ Python CLI package. No server, no database, no UI. Everything is config-driven a
 
 ```
 mulegraph/
-  cli.py            # Typer entry point: run / drift / smoke
-  config.py         # Pydantic schema for configs/*.yaml (RunConfig, DriftRunConfig)
+  cli.py            # Typer entry point: run / drift / score / smoke
+  config.py         # Pydantic schema for configs/*.yaml (RunConfig, DriftRunConfig, ScoreConfig)
   pipeline.py       # Orchestrator — the only module that knows all the others
   types.py          # GraphDataset, Split, FeatureMatrix, Predictions; a "unit" is a node or an edge
   util.py           # Paths, hashing, seeding, provenance
@@ -34,6 +34,8 @@ docs/
 **Benchmark data flow:** config → validate → load/cache graph → causal features → split + leakage check → fit each (regime, model, seed) → threshold on val → metrics + per-timestep curves → MLflow child run → tables + figures.
 
 **Drift data flow:** same to the fit, then score every unit from the validation window on → PSI / KS / confidence shift per batch against the validation reference → lead time against the F1 curve → tables + figure.
+
+**Score data flow (D5):** same load, features and split → fit once and cache the model plus its validation threshold → score one batch → ranked alert queue + label-free health check → exit 3 on a flag.
 
 **Component coupling rule:** every component depends only on the shared types in `types.py`. Only `pipeline.py` imports across subsystems.
 
@@ -100,6 +102,7 @@ uv run mulegraph run --config configs/amlworld_xgb.yaml       # XGBoost rows onl
 uv run mulegraph run --config configs/amlworld_hi_small.yaml  # full grid with SAGE, Kaggle
 uv run mulegraph run --config configs/elliptic_rolling.yaml   # fixed vs rolling refit, ~35 min
 uv run mulegraph drift --config configs/elliptic_drift.yaml
+uv run mulegraph score --config configs/amlworld_score.yaml  # one day's alert queue + health check; exit 3 on a flag
 uv run mulegraph smoke                     # ~10 s, synthetic graph, used in CI
 
 # Quality

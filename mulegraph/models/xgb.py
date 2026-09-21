@@ -2,10 +2,11 @@
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Any
 
 import numpy as np
-from xgboost import XGBClassifier
+from xgboost import DMatrix, XGBClassifier
 
 from mulegraph.models.base import FitInfo, check_train_labelled
 from mulegraph.types import FeatureMatrix, GraphDataset, Split
@@ -108,3 +109,29 @@ class XGBModel:
         if self.clf is None:
             raise RuntimeError("XGBModel.predict_proba called before fit")
         return self.clf.predict_proba(feats.values[idx])[:, 1].astype(np.float32)
+
+    def contributions(self, feats: FeatureMatrix, idx: np.ndarray) -> np.ndarray:
+        """Per-feature log-odds contributions (TreeSHAP) for ``idx``, bias column dropped (D5)."""
+        if self.clf is None:
+            raise RuntimeError("XGBModel.contributions called before fit")
+        # Only the trees predict_proba uses: early stopping leaves 50 more in the booster.
+        best = getattr(self.clf, "best_iteration", None)
+        trees = (0, 0) if best is None else (0, best + 1)
+        matrix = DMatrix(feats.values[idx])
+        return self.clf.get_booster().predict(matrix, pred_contribs=True, iteration_range=trees)[
+            :, :-1
+        ]
+
+    def save(self, path: Path) -> None:
+        """Write the fitted booster so a later ``score`` reuses it (D5)."""
+        if self.clf is None:
+            raise RuntimeError("XGBModel.save called before fit")
+        self.clf.save_model(path)
+
+    @classmethod
+    def load(cls, path: Path) -> XGBModel:
+        """Read a booster written by ``save``."""
+        model = cls({})
+        model.clf = XGBClassifier()
+        model.clf.load_model(path)
+        return model

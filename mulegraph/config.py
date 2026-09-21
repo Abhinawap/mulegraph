@@ -5,7 +5,7 @@ from __future__ import annotations
 import logging
 import os
 from pathlib import Path
-from typing import Any, Literal
+from typing import Any, Literal, TypeVar
 
 import yaml
 from pydantic import BaseModel, Field, model_validator
@@ -214,7 +214,7 @@ class RunConfig(Strict):
         return len(self.models) * len(self.seeds) * sum(r.fits for r in self.split.regimes)
 
 
-class DriftConfig(Strict):
+class DetectorConfig(Strict):
     """Detector thresholds (PR-R1); the reference is always the validation window."""
 
     detectors: list[Literal["psi", "ks", "conf", "alert"]] = Field(
@@ -229,6 +229,11 @@ class DriftConfig(Strict):
     alert_flag: float = Field(0.5, gt=0.0)
     #: Replace the fixed flags with each detector's leave-one-out maximum inside the reference.
     calibrate: bool = False
+
+
+class DriftConfig(DetectorConfig):
+    """Detector thresholds plus the label-side lead-time rule (PR-R4)."""
+
     #: Relative F1 fall from the validation mean, sustained for ``drop_run`` batches, = broken;
     #: a detector warns only after ``drop_run`` consecutive flags.
     f1_drop: float = Field(0.2, gt=0.0, lt=1.0)
@@ -258,7 +263,50 @@ class DriftRunConfig(RunConfig):
         return self
 
 
-def load_config(path: str | Path, cls: type[RunConfig] = RunConfig) -> RunConfig:
+class ScoreConfig(Strict):
+    """One deployed model scoring one batch, with a label-free health check (D5, PR-R2)."""
+
+    name: str
+    dataset: DatasetConfig
+    features: FeaturesConfig = Field(default_factory=FeaturesConfig)
+    split: SplitConfig
+    model: ModelConfig
+    health: DetectorConfig = Field(default_factory=DetectorConfig)
+    #: The batch to score; it must fall in the regime's test window, after the reference.
+    batch: int
+    device: Literal["auto", "cuda", "cpu"] = "auto"
+
+    @model_validator(mode="after")
+    def _check(self) -> ScoreConfig:
+        regimes = self.split.regimes
+        if len(regimes) != 1 or regimes[0].regime != "temporal":
+            raise ValueError(
+                "score needs exactly one temporal regime: the model trains before the "
+                "validation window, and the scored batch comes after it (PR-E4, PR-R2)"
+            )
+        if self.model.name != "xgb":
+            raise ValueError(
+                f"score deploys xgb only, got {self.model.name!r}: a GNN scores through the "
+                "whole graph, so it has no saved model to reuse from one day to the next"
+            )
+        test = regimes[0].test
+        assert test is not None
+        if not test[0] <= self.batch <= test[1]:
+            raise ValueError(
+                f"batch {self.batch} must fall in the test window {test}, after the "
+                "validation window the threshold and the health reference come from (PR-E4)"
+            )
+        return self
+
+    @property
+    def needs_gfp(self) -> bool:
+        return self.model.features == "base_gfp"
+
+
+C = TypeVar("C", bound=BaseModel)
+
+
+def load_config(path: str | Path, cls: type[C] = RunConfig) -> C:  # type: ignore[assignment]
     """Read and validate a YAML config; ``MULEGRAPH_DEVICE`` overrides ``device``."""
     path = Path(path)
     if not path.is_file():
