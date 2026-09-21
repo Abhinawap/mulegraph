@@ -4,6 +4,11 @@ Project history, newest first. Add a dated entry for every tag and every change 
 
 ---
 
+## Unreleased
+
+### 21 Sep 2026 — Kaggle hardware corrected: T4, not P100
+- **Fixed** the hardware named for the AMLworld SAGE run: it was a Kaggle **T4 x2** notebook, and the code uses one of the two GPUs (`device: cuda` on all 13 runs in `report/exports/amlworld_hi_small_runs.csv`; the export does not record the GPU model). README, methods §12.3, status, `kaggle/amlworld_sage.md` and one test comment said P100. No number changes. The `v1.0` tag still carries the wrong name in its README.
+
 ## v1.0 — 21 Sep 2026
 
 Portfolio release. The two-by-two benchmark runs end to end on both datasets, and the answer is the same on each: graph *features* help, a graph *model* does not. XGBoost with causal GFP features beats GraphSAGE on Elliptic++ and on AMLworld HI-Small, every paired-by-seed interval excluding zero (methods §12.3).
@@ -65,7 +70,7 @@ Tagged on the merge of PR #38. Carries an MLflow export for every experiment it 
 - **Added** the label-free drift monitor (`drift/detectors.py`, `drift/monitor.py`) and `mulegraph drift`: PSI and KS on features, KS on model scores, per batch against the validation reference; lead time against the F1 curve; `configs/elliptic_drift.yaml` (`d322082`; PR-R1–R4). Detector signatures are tested for the absence of labels.
 - **Added** AMLworld HI-Small as an edge task (`data/amlworld.py`; PR-D2): a unit is an edge, `batch_id` is the day, GFP rows are used per edge, splits and chronology run on `batch_id`, `configs/amlworld_hi_small.yaml` runs `xgb.base` and `xgb.base_gfp` on IBM's day 0–5 / 6–7 / 8–17 split (`a10c53c`). `dataset.max_days` truncates for a small host and is part of the cache key.
 - **Changed** the drift monitor after the first real run: with PSI ≥ 0.2 / KS p < 0.01 every Elliptic test timestep was flagged from t38. `drift.calibrate: true` sets each detector's threshold to its largest leave-one-out score inside the validation window; `drift.drop_run` makes the F1 drop persist for two batches (`df98d4f`). Result on `xgb.base_gfp`: PSI flags t39, KS t40, collapse t43 (lead 4 / 3); the score-shift detector fires only at t49.
-- **Added** `models/sage_edge.py`: GraphSAGE over accounts with a learned embedding and an edge head, trained and scored through `LinkNeighborLoader` with `time_attr` so a seed edge never samples a later edge (`5546a8d`; PR-M3, PR-F2). `configs/amlworld_hi_small.yaml` gains the two SAGE rows; `kaggle/amlworld_sage.md` runs the grid on a Kaggle P100.
+- **Added** `models/sage_edge.py`: GraphSAGE over accounts with a learned embedding and an edge head, trained and scored through `LinkNeighborLoader` with `time_attr` so a seed edge never samples a later edge (`5546a8d`; PR-M3, PR-F2). `configs/amlworld_hi_small.yaml` gains the two SAGE rows; `kaggle/amlworld_sage.md` runs the grid on a Kaggle GPU notebook (T4 x2; first written as P100, corrected 21 Sep 2026).
 - **Ran** AMLworld HI-Small XGBoost on the full data (8 min, 5.0 GB RSS): `xgb.base` F1 0.209 / PR-AUC 0.109, `xgb.base_gfp` F1 0.540 / PR-AUC 0.521 (`report/tables/amlworld_xgb_*`).
 - **Pinned** `matplotlib` as a direct dependency. `report/figures/` and the final tables are now tracked (smoke and dev outputs stay ignored).
 - **Repository made public.** The 13 dissertation-only GitHub issues were closed as not planned and the four milestones deleted.
