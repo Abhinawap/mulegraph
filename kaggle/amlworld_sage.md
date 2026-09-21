@@ -1,10 +1,10 @@
 # Running the AMLworld grid on Kaggle
 
 The two GraphSAGE rows on HI-Small need more host memory than a 7 GB laptop has for the
-10M-edge undirected graph plus PyG's sampler. A Kaggle notebook with a P100 (16 GB GPU, ~29 GB
-RAM) runs the whole `configs/amlworld_hi_small.yaml` grid in one go.
+10M-edge undirected graph plus PyG's sampler. A Kaggle notebook with T4 x2 (2 x 15 GB GPU, ~29 GB
+RAM; the code uses one of the two GPUs) runs the whole `configs/amlworld_hi_small.yaml` grid in one go.
 
-Notebook settings: Accelerator **GPU P100**, Internet **on**, add the dataset
+Notebook settings: Accelerator **GPU T4 x2**, Internet **on**, add the dataset
 `ealtman2019/ibm-transactions-for-anti-money-laundering-aml` as input.
 
 Cell 1 — install the repo (pinned deps; ~3 min):

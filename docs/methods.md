@@ -389,7 +389,7 @@ The GFP result is coherent with the field: on Elliptic the timestep components a
 
 ### 12.3 AMLworld HI-Small (`87f1f5a`)
 
-Temporal split, days 0–5 / 6–7 / 8–17 (§9.1), three seeds, from `report/tables/amlworld_hi_small_results.csv` (`configs/amlworld_hi_small.yaml`), run on a Kaggle P100 (`kaggle/amlworld_sage.md`; MLflow export `report/exports/amlworld_hi_small_runs.csv`). XGBoost is deterministic, so its intervals are zero (§8.3); its rows are identical to the laptop run of `configs/amlworld_xgb.yaml` at `2546822`.
+Temporal split, days 0–5 / 6–7 / 8–17 (§9.1), three seeds, from `report/tables/amlworld_hi_small_results.csv` (`configs/amlworld_hi_small.yaml`), run on a Kaggle T4 (`kaggle/amlworld_sage.md`; MLflow export `report/exports/amlworld_hi_small_runs.csv`). XGBoost is deterministic, so its intervals are zero (§8.3); its rows are identical to the laptop run of `configs/amlworld_xgb.yaml` at `2546822`.
 
 | Config | F1 | PR-AUC | P@R0.5 | P@R0.8 |
 |---|---|---|---|---|
