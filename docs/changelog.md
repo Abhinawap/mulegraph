@@ -6,6 +6,10 @@ Project history, newest first. Add a dated entry for every tag and every change 
 
 ## Unreleased
 
+### 21 Sep 2026 — `mulegraph smoke` also runs the scoring path
+- **Changed** `mulegraph smoke` to finish by scoring the first test batch with the model and settings of `configs/amlworld_score.yaml` (calibrated detectors, all history before the test window as the health reference) and to print the alert queue and health file it wrote. CI runs smoke on every push, so the product path is now exercised there, and the no-download first run produces an alert queue rather than only a results table. About 15 s; outputs land in the gitignored `report/tables/smoke_*`.
+- **Found** while building it: with the score command's default detectors (fixed flag levels, validation window as reference), the synthetic graph's batch 38 reads `drift_flagged` on data with no drift. Each synthetic batch has 51 units, so PSI (1.18 against 0.2) and alert rate (0.86 against 0.5) are sampling noise. The smoke step uses the shipped settings instead, which report no drift (PSI 0.90 against a calibrated 2.3). That setting was fixed before looking at the result, not adjusted to it.
+
 ### 21 Sep 2026 — A longer health-check reference for `mulegraph score`; README heading
 - **Added** `reference: [first, last]` to the score config: the batches the health check compares the scored day against. Unset it is the validation window, as before. It must be an ordered range wholly before `batch`, and a range reaching into training batches logs a warning (the model scored those in-sample). It is a health-check setting only: changing it never refits the model or moves the threshold (PR-E4), and no label reaches it (PR-R2). Design D5, §3.4a.
 - **Measured** on AMLworld, which detectors flag (F1 on those days is 0.38 on day 8 and 0.45 on day 9, so days 8 and 9 are ordinary; day 10 is the laundering tail, where ordinary traffic stops and 396 units remain):

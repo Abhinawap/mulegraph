@@ -67,11 +67,11 @@ def run(config: ConfigOption) -> None:
 def smoke(
     keep: Annotated[bool, typer.Option("--keep", help="Keep the temporary run directory.")] = False,
 ) -> None:
-    """End-to-end check on a synthetic graph, about 10 s. Used in CI."""
+    """End-to-end check on a synthetic graph: a benchmark, then one scored batch. Used in CI."""
     from mulegraph.pipeline import run_smoke
 
-    table = run_smoke(keep=keep)
-    typer.secho(f"smoke OK: {table}", fg=typer.colors.GREEN)
+    table, alerts, health = run_smoke(keep=keep)
+    typer.secho(f"smoke OK: {table}\nalerts: {alerts}\nhealth: {health}", fg=typer.colors.GREEN)
 
 
 @app.command()

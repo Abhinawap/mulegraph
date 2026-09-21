@@ -158,7 +158,7 @@ data/
 | `mulegraph run --config <yaml>` | Full benchmark run |
 | `mulegraph drift --config <yaml>` | Fit, then run label-free detectors and report lead time |
 | `mulegraph score --config <yaml>` | Score one batch with the deployed model: alert queue plus label-free health check (D5) |
-| `mulegraph smoke` | Ten-second end-to-end check on a synthetic graph (used in CI) |
+| `mulegraph smoke` | Fifteen-second end-to-end check on a synthetic graph: a benchmark, then one scored batch with the settings of `configs/amlworld_score.yaml` (used in CI) |
 
 ```python
 class BaseModel(Protocol):

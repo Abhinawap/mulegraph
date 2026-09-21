@@ -103,7 +103,7 @@ uv run mulegraph run --config configs/amlworld_hi_small.yaml  # full grid with S
 uv run mulegraph run --config configs/elliptic_rolling.yaml   # fixed vs rolling refit, ~35 min
 uv run mulegraph drift --config configs/elliptic_drift.yaml
 uv run mulegraph score --config configs/amlworld_score.yaml  # one day's alert queue + health check; exit 3 on a flag
-uv run mulegraph smoke                     # ~10 s, synthetic graph, used in CI
+uv run mulegraph smoke                     # ~15 s, synthetic graph, benchmark + one scored batch, used in CI
 
 # Quality
 uv run ruff check . && uv run ruff format .
