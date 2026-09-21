@@ -330,6 +330,7 @@ To regenerate: check out `mvp`, run `uv sync`, place the three Elliptic++ 2023.1
 - **`base` omits local Elliptic++ attributes.** Dropping the 15 non-graph extras keeps `raw165` comparable with published work but withholds local information from `base`.
 - **Opaque features.** The 165 Elliptic features are anonymised and their construction is undocumented. Šafář et al. (2026) argue this hides leakage (§13).
 - **One machine.** Timings come from one laptop GPU.
+- **The AMLworld GNN is a lower bound.** The SAGE edge head passes messages between learned account embeddings only; transaction features enter at the head, for the scored edge alone, and its F1 without GFP (0.05) is below XGBoost on the same six fields (0.21). Edge-aware GNNs (GIN+EU, PNA) report far higher on HI-Small (§13), so §12.3 says XGBoost beats *this* GNN, not GNNs.
 
 ## 12. Results
 
@@ -375,16 +376,32 @@ The random split inflates F1 by 0.18 to 0.34 over the temporal split for every c
 
 The GFP result is coherent with the field: on Elliptic the timestep components are disconnected, so a one-timestep GFP window has little to see, and Maganti (2026) finds the real edges carry less signal than shuffled ones under shift. On AMLworld, where GFP is IBM's own headline, the same two-by-two shows whether that reverses.
 
-### 12.3 AMLworld HI-Small (`2546822`)
+### 12.3 AMLworld HI-Small (`87f1f5a`)
 
-Temporal split, days 0–5 / 6–7 / 8–17 (§9.1), three seeds, from `report/tables/amlworld_xgb_results.csv` (`configs/amlworld_xgb.yaml`). XGBoost is deterministic, so the intervals are zero (§8.3).
+Temporal split, days 0–5 / 6–7 / 8–17 (§9.1), three seeds, from `report/tables/amlworld_hi_small_results.csv` (`configs/amlworld_hi_small.yaml`), run on a Kaggle P100 (`kaggle/amlworld_sage.md`; MLflow export `report/exports/amlworld_hi_small_runs.csv`). XGBoost is deterministic, so its intervals are zero (§8.3); its rows are identical to the laptop run of `configs/amlworld_xgb.yaml` at `2546822`.
 
 | Config | F1 | PR-AUC | P@R0.5 | P@R0.8 |
 |---|---|---|---|---|
 | `xgb.base` | 0.209 | 0.109 | 0.090 | 0.034 |
 | `xgb.base_gfp` | 0.539 | 0.521 | 0.570 | 0.099 |
+| `sage.base` | 0.052 ± 0.007 | 0.024 ± 0.004 | 0.018 ± 0.011 | 0.010 ± 0.004 |
+| `sage.base_gfp` | 0.142 ± 0.031 | 0.082 ± 0.017 | 0.043 ± 0.019 | 0.019 ± 0.011 |
 
-On AMLworld the GFP features more than double F1, the reverse of Elliptic. The test window reaches into the post-day-10 laundering tail (§9.1), so the per-day curve (`report/tables/amlworld_xgb_curves.csv`) matters here as it does on Elliptic: on the two realistic test days (8–9) GFP takes F1 from 0.10–0.20 to 0.38–0.45, and from day 10 every config scores PR-AUC above 0.92. The SAGE rows need the Kaggle run in `kaggle/amlworld_sage.md`. A first run was stamped `7c22e3e-dirty` (§10.2); the clean rerun at `2546822` reproduced it exactly.
+Paired-by-seed gaps (§8.3), mean and 95% t-interval over three seeds:
+
+| Gap | F1 | PR-AUC |
+|---|---|---|
+| `xgb.base` − `sage.base` | +0.157 [0.149, 0.164] | +0.084 [0.080, 0.089] |
+| `xgb.base_gfp` − `sage.base_gfp` | +0.397 [0.366, 0.429] | +0.439 [0.422, 0.457] |
+| `sage.base_gfp` − `sage.base` | +0.090 [0.062, 0.118] | +0.057 [0.036, 0.078] |
+
+All three exclude zero. `xgb.base_gfp` − `xgb.base` (+0.331 F1) is a deterministic pair and carries no interval (§8.3). On AMLworld the GFP features more than double XGBoost's F1, the reverse of Elliptic, and they help SAGE as well; XGBoost beats SAGE in both feature sets, and SAGE with GFP scores below XGBoost without it. The GFP gain is larger for XGBoost (+0.33) than for SAGE (+0.09).
+
+The test window reaches into the post-day-10 laundering tail (§9.1), so the per-day curve (`report/tables/amlworld_hi_small_curves.csv`) matters here as it does on Elliptic. On the two realistic test days (8–9) GFP takes XGBoost's F1 from 0.10–0.20 to 0.38–0.45 and SAGE's from 0.03–0.06 to 0.07–0.15; from day 10 XGBoost scores PR-AUC above 0.92 in every config and SAGE 0.57–0.91. The ranking is the same on the realistic days as over the whole window.
+
+**Alert load on the realistic days** (`scripts/readme_figures.py`, `report/tables/amlworld_alert_load.csv`, run `2546822`). Pooling test days 8–9 only (862,792 transactions, 956 laundering) and reading precision at a fixed recall off the XGBoost scores, an analyst opens 26.3 alerts per laundering case caught at recall 0.5 on the raw fields and 4.4 with GFP, and 77.0 against 40.9 at recall 0.8. Over the whole test window the recall-0.5 figures are 11.1 and 1.8; the tail after day 10 flatters both. These are curve points, not the deployed threshold (§7.2).
+
+SAGE here is the edge head (`models/sage_edge.py`) with `epochs: 10, patience: 3`, not the node model's 200 / 20 (§6.2). Every seed stopped early, at best epoch 3–5, so the epoch cap did not bind. SAGE fits took 10–13 min each; the grid took 1 h 14 min. The XGBoost-only laptop run was first stamped `7c22e3e-dirty` (§10.2); the clean rerun at `2546822` reproduced it exactly.
 
 ### 12.4 Drift monitor on the t43 shutdown (`7a19cb9`)
 
@@ -499,7 +516,7 @@ Our SAGE trails his by about 0.1 F1; we have not measured how much of that each 
 
 **Egressy et al. (2024)** proposed Multi-GNN, with edge updates (GIN+EU) and PNA for directed multigraphs, and reported that these GNNs closely match or outperform tree baselines on AMLworld.
 
-**Blanuša et al. (2024)** introduced the Graph Feature Preprocessor and reported that GFP with XGBoost beats PNA on every AMLworld set (HI-Small 63.2 against 56.8), under a temporal 60/20/20 split with no inductive test. The two IBM groups therefore disagree on the same data, and nobody has run both model families under one protocol and one budget. The AMLworld two-by-two is designed to do that.
+**Blanuša et al. (2024)** introduced the Graph Feature Preprocessor and reported that GFP with XGBoost beats PNA on every AMLworld set (HI-Small 63.2 against 56.8), under a temporal 60/20/20 split with no inductive test. The two IBM groups therefore disagree on the same data, and nobody has run both model families under one protocol and one budget. The AMLworld two-by-two runs both under one protocol, with GraphSAGE standing in for their GNNs: GFP with XGBoost wins by 0.40 F1 (§12.3), which sides with Blanuša et al., though it says nothing about PNA or GIN+EU themselves.
 
 **Šafář et al. (2026)**, *The enemy of reproducibility is opacity: What's inside the Elliptic bitcoin dataset (and why it is wrong)*, FSI: Digital Investigation (DFRWS USA 2026). Read at abstract level only (paywalled). The abstract argues that Elliptic's feature construction is opaque and that leakage across the standard splits inflates reported performance. The open question is *where* the leakage sits: in the 72 aggregated features only, or in the 93 local features too. The design keeps the aggregates out of `base` (PR-M7), so leakage confined to them would affect only `xgb.raw165` and the published baselines. If it reaches the local features, Elliptic serves only as the drift dataset (the t43 event) and AMLworld carries the benchmark claim.
 

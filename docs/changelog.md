@@ -4,7 +4,24 @@ Project history, newest first. Add a dated entry for every tag and every change 
 
 ---
 
-## Unreleased
+## v1.0 — 21 Sep 2026
+
+Portfolio release. The two-by-two benchmark runs end to end on both datasets, and the answer is the same on each: graph *features* help, a graph *model* does not. XGBoost with causal GFP features beats GraphSAGE on Elliptic++ and on AMLworld HI-Small, every paired-by-seed interval excluding zero (methods §12.3).
+
+The headline drift result is a negative one, reported as measured: on Elliptic's real t43 dark-market collapse (F1 0.85 → 0.02), no label-free detector gives warning once a flag must hold for two timesteps. PSI, KS and the score-shift detector never hold; the alert-rate detector peaks at t43 but recovers at t44. The event diagnosis (methods §12.5) says why, and the `temporal_rolling` regime (methods §12.6) measures what post-shift labels buy instead: post-t43 F1 0.02 → 0.35, and only from t47.
+
+Tagged on the merge of PR #37. Carries `report/exports/amlworld_hi_small_runs.csv` and `report/exports/mvp_elliptic_mvp_runs.csv`.
+
+### 20 Sep 2026 — README rewritten for a software-engineering audience
+- **Rewrote** `README.md` from a research log (~260 lines) to a ~180-line page: a 30-second summary, quickstart with real smoke output, an engineering section (architecture diagram, test-enforced integrity rules, three bugs), results next to published numbers and the leaky random split, and one drift figure. Detector tables, footnotes and the full "what didn't work" list stay in `docs/methods.md`.
+- **Added** `scripts/readme_figures.py`, which writes `report/figures/readme_alert_load.png`, `report/figures/readme_recovery.png` and `report/tables/amlworld_alert_load.csv` from the `amlworld_xgb` run (`2546822`) and `elliptic_rolling_curves.csv`. On the realistic AMLworld test days 8–9, GFP takes alerts per laundering case caught at recall 0.5 from 26.3 to 4.4 (whole window: 11.1 to 1.8, flattered by the tail). Methods §12.3.
+- **Added** a limitation (methods §11): the AMLworld SAGE edge head is a lower bound, as transaction features never enter its message passing.
+- **Fixed** the stale drift caption that said PSI held a flag at t48; that flag went away at `ea5ecce`.
+
+### 20 Sep 2026 — AMLworld SAGE rows from the Kaggle P100 run
+- **Ran** `configs/amlworld_hi_small.yaml` on a Kaggle P100 from a clean clone at `87f1f5a` (12 fits, 1 h 14 min; SAGE fits 10–13 min each, every seed early-stopped at best epoch 3–5 of 10). XGBoost rows are identical to the laptop's `amlworld_xgb` run.
+- **Found** `sage.base` F1 0.052 ± 0.007 and `sage.base_gfp` 0.142 ± 0.031, against XGBoost's 0.209 and 0.539. Paired-by-seed F1 gaps: XGBoost − SAGE +0.157 on `base` and +0.397 on `base_gfp`, GFP − base within SAGE +0.090; every interval excludes zero. The ranking holds on the realistic test days 8–9 as well as over the laundering tail.
+- **Added** `report/tables/amlworld_hi_small_*`, `report/figures/amlworld_hi_small_curves.png` and the MLflow export `report/exports/amlworld_hi_small_runs.csv`. README, methods §12.3, status.
 
 ### 19 Sep 2026 — First Kaggle attempt: a CUDA-only bug in the SAGE edge head
 - **Fixed** `SAGEEdgeModel._infer` read `batch.input_id` after `_forward` had moved the batch to the GPU in place (PyG's `batch.to()`), so edge SAGE failed at its first validation pass on CUDA. CPU hides it: `.to("cpu")` is a no-op. The edge-SAGE fixture now also runs on CUDA when one is present (skipped in CI).
