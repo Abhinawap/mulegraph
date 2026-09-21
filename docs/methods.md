@@ -24,18 +24,13 @@ Each edge takes its source node's timestep as `edge_time`. That definition is ca
 
 We model Elliptic++ as a transaction graph: a node is a transaction, an edge is a flow of bitcoin from one transaction's outputs to another's inputs (D1). The 49 timesteps form 49 disconnected components. The Elliptic++ actor (wallet) graph, where entities do persist across time, is out of scope.
 
-This graph structure fixes how many evaluation regimes Elliptic can support. Four regimes are defined (PR-E1, PR-E7):
+This graph structure fixes how many evaluation regimes Elliptic can support. Three regimes are defined (PR-E1, PR-E7):
 
 - **random**: a stratified partition of labelled nodes, ignoring time. Training and test nodes share timestep components, so a GNN aggregates test nodes' features (never their labels) during training. The regime is transductive and leaks the future; we run it to measure what a random split inflates.
 - **temporal**: train on earlier timesteps, validate and test on later ones. The model is fitted once and never refreshed.
 - **temporal_rolling**: the temporal window slides forward one batch per test batch. For test batch *t* the model is refit on labels up to *t* − 4 and thresholded on *t* − 3 … *t* − 1, so each step is an ordinary temporal fit and the twelve test batches are scored by twelve models. It is the deployment-realistic counterpart of `temporal`: what a model that is always as fresh as its labels allow can do, with zero label lag beyond the validation window (§5).
-- **temporal_inductive**: as temporal, with test nodes removed from the training graph and their features built only from edges that existed at their own time.
 
-On Elliptic the temporal split is already inductive. No edge crosses a timestep, so no test node can appear in any training node's neighbourhood and no training-period edge can reach a test node's features. A separate inductive regime would produce the same partition under a different name. The toolkit therefore treats `temporal_inductive` as undefined on Elliptic. `build_split` raises `RegimeNotSupportedError` whenever `meta.cross_time_edges` is False, with the message:
-
-> temporal_inductive is rejected on elliptic_pp: meta.cross_time_edges is False, so its temporal split is already inductive by construction and a separate inductive regime is undefined (D1).
-
-The pipeline builds every split before the first model fit, so a config that requests the regime fails in seconds instead of after hours of fitting. The `temporal_inductive` regime is not implemented on AMLworld either; AMLworld is evaluated under random and temporal splits only, and `temporal_rolling` is run on Elliptic only (§12.6).
+On Elliptic the temporal split is already inductive. No edge crosses a timestep, so no test node can appear in any training node's neighbourhood and no training-period edge can reach a test node's features; a separate inductive regime would produce the same partition under a different name. No such regime is built, and the config refuses one (design §1, out of scope). On AMLworld, where accounts do persist across days, an inductive regime would differ from `temporal`, but it is not built either; AMLworld is evaluated under random and temporal splits only, and `temporal_rolling` is run on Elliptic only (§12.6).
 
 ## 3. Feature sets: `base`, `base_gfp` and `raw165`
 

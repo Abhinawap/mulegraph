@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable, Sequence
 from pathlib import Path
 
 import matplotlib
@@ -12,22 +11,11 @@ import pandas as pd
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt  # noqa: E402
 
-Interval = Callable[[Sequence[float]], tuple[float, float, float]]
 
-
-def _interval(interval: Interval | None) -> Interval:
-    if interval is not None:
-        return interval
-    from mulegraph.eval.intervals import seed_interval
-
-    return seed_interval
-
-
-def plot_curves(
-    curves: pd.DataFrame, path: Path, metric: str = "f1", interval: Interval | None = None
-) -> Path:
+def plot_curves(curves: pd.DataFrame, path: Path, metric: str = "f1") -> Path:
     """One panel per regime: mean ``metric`` per timestep per config, across-seed t band."""
-    interval = _interval(interval)
+    from mulegraph.eval.intervals import seed_interval as interval
+
     regimes = sorted(curves["regime"].unique())
     fig, axes = plt.subplots(
         1, len(regimes), figsize=(6 * len(regimes), 4), squeeze=False, sharey=True

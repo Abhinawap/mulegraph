@@ -4,6 +4,14 @@ Project history, newest first. Add a dated entry for every tag and every change 
 
 ---
 
+## Unreleased
+
+### 21 Sep 2026 — Ponytail audit cuts
+- **Removed** the `temporal_inductive` regime. The config accepted it and `build_split` refused it every time, on every dataset: accepted-but-ignored scaffolding. Design §1 already listed it as out of scope; methods §2 now says three regimes, and why an inductive regime would add nothing on Elliptic. A config that still asks for it fails at validation with the three valid regimes named, rather than with the old dataset-specific reason. Three tests went with it.
+- **Removed** the `temp_cycle` feature family from the config schema: no config used it. The GFP driver still passes every snapml family explicitly (temp-cycle off), so the feature output and every recorded `feature_version` are unchanged.
+- **Simplified** `plot_curves`, whose injectable interval nobody injected; `conf_shift`, which returned a p-value nobody read; and a one-entry tag alias in the results reporter.
+- **Kept**, against the audit: the snapml family mapping (the explicit off is what pins the output across snapml upgrades), and the health file's own JSON writer (`util.write_json` sorts keys, which would bury `status`).
+
 ## v1.2 — 21 Sep 2026
 
 `mulegraph score` and `mulegraph smoke` now write a static HTML report for each scored batch, beside the alert queue and health file: a banner saying whether a detector flagged the day, each detector's score against its flag level, the top 25 alerts with the features behind each, and the provenance. It is one self-contained page with no scripts and nothing loaded from outside. The rendered layout was not looked at in a browser before this tag (none was available), only its structure, its figure and its tests; see the entry below.

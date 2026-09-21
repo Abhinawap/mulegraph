@@ -53,18 +53,6 @@ def test_raw165_is_xgb_only() -> None:
         _cfg(models=[{"name": "sage", "features": "raw165"}])
 
 
-def test_temporal_inductive_parses_but_is_the_split_builders_problem() -> None:
-    # D1 rejection depends on meta.cross_time_edges, which the config cannot see.
-    cfg = _cfg(
-        split={
-            "regimes": [
-                {"regime": "temporal_inductive", "train_end": 34, "val": [35, 37], "test": [38, 49]}
-            ]
-        }
-    )
-    assert cfg.split.regimes[0].regime == "temporal_inductive"
-
-
 def test_temporal_regime_requires_boundaries() -> None:
     with pytest.raises(ValidationError, match="train_end"):
         _cfg(split={"regimes": [{"regime": "temporal"}]})

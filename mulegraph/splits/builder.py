@@ -15,8 +15,6 @@ from mulegraph.util import hash_arrays, hash_dict, write_json
 
 log = logging.getLogger("mulegraph")
 
-TEMPORAL_REGIMES = ("temporal", "temporal_inductive")
-
 
 class RegimeNotSupportedError(ValueError):
     """A regime that is undefined on this dataset, not merely unimplemented."""
@@ -124,7 +122,7 @@ def check_leakage(
                 "PR-AUC is undefined and threshold selection is meaningless"
             )
 
-    if regime in TEMPORAL_REGIMES and data.meta.cross_time_edges and data.task == "node":
+    if regime == "temporal" and data.meta.cross_time_edges and data.task == "node":
         # PR-E1: no test id in any training neighbourhood. Implied by time order when
         # timestep components are disconnected, so only checked where an edge can join them.
         # On an edge task the units are the edges themselves, already disjoint by time; an
@@ -142,7 +140,7 @@ def check_leakage(
                 "them into the fitted model (PR-E1)"
             )
 
-    if regime in TEMPORAL_REGIMES:
+    if regime == "temporal":
         for earlier, later in (("train", "val"), ("val", "test")):
             hi = int(data.batch_id[parts[earlier]].max())
             lo = int(data.batch_id[parts[later]].min())
@@ -167,18 +165,6 @@ def _cache_paths(cache_dir: Path, digest: str) -> dict[str, Path]:
 
 def build_split(data: GraphDataset, cfg: RegimeConfig, cache_dir: Path) -> Split:
     """Build, leak-check and cache one regime's partition; a cache hit checks determinism."""
-    if cfg.regime == "temporal_inductive":
-        if data.meta.cross_time_edges is False:
-            raise RegimeNotSupportedError(
-                f"temporal_inductive is rejected on {data.meta.dataset}: meta.cross_time_edges "
-                "is False, so its temporal split is already inductive by construction and a "
-                "separate inductive regime is undefined (D1)."
-            )
-        raise RegimeNotSupportedError(
-            f"temporal_inductive is not built for {data.meta.dataset}: meta.cross_time_edges is "
-            "True, and no split that removes test units from the training graph exists yet."
-        )
-
     if cfg.regime == "random":
         train, val, test = _random_split(data, cfg)
     elif cfg.regime == "temporal":

@@ -17,7 +17,7 @@ def _scorers(
     table = {
         "psi": lambda rx, cx, rp, cp: float(psi(rx, cx, bins).max()),
         "ks": lambda rx, cx, rp, cp: ks_frac(rx, cx, ks_alpha),
-        "conf": lambda rx, cx, rp, cp: conf_shift(rp, cp)[0],
+        "conf": lambda rx, cx, rp, cp: conf_shift(rp, cp),
         "alert": lambda rx, cx, rp, cp: alert_shift(rp, cp, threshold),
     }
     return {name: table[name] for name in detectors}

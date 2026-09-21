@@ -38,7 +38,7 @@ def test_detectors_increase_with_shift() -> None:
     deltas = [0.0, 0.3, 0.8, 2.0]
     psi_max = [psi(*_shifted(d)).max() for d in deltas]
     ks = [ks_frac(*_shifted(d)) for d in deltas]
-    conf = [conf_shift(_shifted(d)[0][:, 0], _shifted(d)[1][:, 0])[0] for d in deltas]
+    conf = [conf_shift(_shifted(d)[0][:, 0], _shifted(d)[1][:, 0]) for d in deltas]
     for series in (psi_max, ks, conf):
         assert all(a <= b for a, b in zip(series, series[1:], strict=False)), series
     assert psi_max[0] < 0.2 < psi_max[-1]

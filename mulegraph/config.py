@@ -12,10 +12,10 @@ from pydantic import BaseModel, Field, model_validator
 
 log = logging.getLogger("mulegraph")
 
-Regime = Literal["random", "temporal", "temporal_rolling", "temporal_inductive"]
+Regime = Literal["random", "temporal", "temporal_rolling"]
 FeatureSelection = Literal["base", "base_gfp", "raw165"]
 MetricName = Literal["f1", "pr_auc", "roc_auc", "p_at_r50", "p_at_r80"]
-GfpFamily = Literal["fan", "degree", "scatter_gather", "lc_cycle", "temp_cycle"]
+GfpFamily = Literal["fan", "degree", "scatter_gather", "lc_cycle"]
 
 
 class Strict(BaseModel):
@@ -83,7 +83,7 @@ class FeaturesConfig(Strict):
 
 
 class RegimeConfig(Strict):
-    """One evaluation regime; ``temporal_inductive`` is rejected later by the split builder (D1)."""
+    """One evaluation regime (PR-E1, PR-E7)."""
 
     regime: Regime
     train_end: int | None = None

@@ -42,12 +42,11 @@ def ks_frac(ref: np.ndarray, cur: np.ndarray, alpha: float = 0.01) -> float:
     return float((p < alpha).mean())
 
 
-def conf_shift(ref_p: np.ndarray, cur_p: np.ndarray) -> tuple[float, float]:
-    """KS statistic and p-value between reference and current model scores."""
+def conf_shift(ref_p: np.ndarray, cur_p: np.ndarray) -> float:
+    """KS statistic between reference and current model scores."""
     if ref_p.size == 0 or cur_p.size == 0:
         raise ValueError("ref_p and cur_p must both be non-empty")
-    res = ks_2samp(ref_p, cur_p)
-    return float(res.statistic), float(res.pvalue)
+    return float(ks_2samp(ref_p, cur_p).statistic)
 
 
 def alert_shift(ref_p: np.ndarray, cur_p: np.ndarray, threshold: float) -> float:

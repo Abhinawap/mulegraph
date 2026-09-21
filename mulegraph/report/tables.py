@@ -34,16 +34,14 @@ CSV_COLUMNS = [
 GROUP_FIELDS = ("dataset", "regime", "model", "features")
 PROVENANCE_FIELDS = ("feature_version", "split_hash", "commit")
 
-#: Run tag behind each export column where the names differ (spec §2.3 logs ``git_commit``).
-_TAG = {"commit": "git_commit"}
-
 #: Metric ordering for the tables; anything else follows, alphabetically.
 _METRIC_ORDER = ("test_f1", "test_pr_auc", "test_roc_auc", "test_p_at_r50", "test_p_at_r80")
 
 
 def _field(runs: pd.DataFrame, field: str) -> pd.Series:
     """One identity/provenance tag per run; a missing one is an error, never a guess (PR-O1)."""
-    tag = _TAG.get(field, field)
+    # Spec §2.3 logs the commit as ``git_commit``; every other column is its own tag name.
+    tag = "git_commit" if field == "commit" else field
     column = f"tags.{tag}"
     if column not in runs.columns or runs[column].isna().any():
         raise ValueError(
