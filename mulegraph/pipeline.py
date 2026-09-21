@@ -15,7 +15,14 @@ from typing import TYPE_CHECKING, Any
 import numpy as np
 import pandas as pd
 
-from mulegraph.config import DriftRunConfig, ModelConfig, RunConfig, ScoreConfig, load_config
+from mulegraph.config import (
+    DetectorConfig,
+    DriftRunConfig,
+    ModelConfig,
+    RunConfig,
+    ScoreConfig,
+    load_config,
+)
 from mulegraph.data import load_dataset
 from mulegraph.drift.monitor import lead_time, score_batches
 from mulegraph.eval.curves import CURVE_METRICS, per_timestep
@@ -700,8 +707,28 @@ def run_score(cfg: ScoreConfig) -> tuple[Path, Path, list[str]]:
     return alerts_path, health_path, flagged
 
 
-def run_smoke(keep: bool = False) -> Path:
-    """End-to-end run on a synthetic graph, about 10 s."""
+def _smoke_score(cfg: RunConfig) -> tuple[Path, Path]:
+    """Score the first test batch with configs/amlworld_score.yaml's health settings (D5)."""
+    regime = cfg.split.regimes[0]
+    assert regime.val is not None and regime.test is not None
+    model = next(m for m in cfg.models if m.name == "xgb" and m.features == "base_gfp")
+    score_cfg = ScoreConfig(
+        name=cfg.mlflow.experiment,
+        dataset=cfg.dataset,
+        features=cfg.features,
+        split=cfg.split,
+        model=model,
+        health=DetectorConfig(calibrate=True),
+        reference=(0, regime.val[1]),
+        batch=regime.test[0],
+        device=cfg.device,
+    )
+    alerts, health, _ = run_score(score_cfg)
+    return alerts, health
+
+
+def run_smoke(keep: bool = False) -> tuple[Path, Path, Path]:
+    """Benchmark then one scored batch on a synthetic graph: results, alert queue, health (D5)."""
     if not SMOKE_CONFIG.is_file():
         raise FileNotFoundError(
             f"smoke config not found at {SMOKE_CONFIG}; `mulegraph smoke` runs from a checkout "
@@ -717,7 +744,8 @@ def run_smoke(keep: bool = False) -> Path:
     previous = {key: os.environ.get(key) for key in overrides}
     os.environ.update(overrides)
     try:
-        return run_benchmark(cfg, SMOKE_CONFIG)
+        table = run_benchmark(cfg, SMOKE_CONFIG)
+        return (table, *_smoke_score(cfg))
     finally:
         # Restore the environment: an in-process caller after this must not inherit
         # the throwaway data directory and run store.

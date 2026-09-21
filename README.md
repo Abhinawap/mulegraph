@@ -35,7 +35,7 @@ Python 3.11 and [uv](https://docs.astral.sh/uv/). All dependencies are pinned in
 
 ```bash
 uv sync
-uv run mulegraph smoke        # about 30 s on a synthetic graph, no downloads
+uv run mulegraph smoke        # about 15 s on a synthetic graph, no downloads
 ```
 
 ```text
@@ -45,8 +45,15 @@ INFO  fit 3/10: temporal xgb.base_gfp seed 0
 INFO  xgb fit: 632 train (57 illicit, spw=10.1) in 0.2s, best_iteration=7, val aucpr=0.8856
 ...
 INFO  wrote report/tables/smoke_results.csv (25 rows)
+INFO  deployed model .../models/1a0f4132a4721d15.ubj, validation threshold 0.9081
+INFO  batch 38: 51 nodes scored, 3 alerts at threshold 0.9081, health no_drift_flagged
 smoke OK: report/tables/smoke_results.csv
+alerts: report/tables/smoke_batch38_alerts.csv
+health: report/tables/smoke_batch38_health.json
 ```
+
+The smoke run ends by scoring one batch the way `mulegraph score` does: a ranked alert queue and a
+health check on whether to trust the scores.
 
 Every experiment is one YAML file, and results go to files, not stdout:
 
