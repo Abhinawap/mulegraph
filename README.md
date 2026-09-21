@@ -4,10 +4,44 @@
 ![Python 3.11](https://img.shields.io/badge/python-3.11-blue)
 ![License: MIT](https://img.shields.io/badge/license-MIT-green)
 
-Score a day of bank transactions and get a ranked alert queue, with the reasons behind each alert,
-plus a check on whether today's scores can be trusted. Underneath is a benchmark that tests
-money-laundering models the way a bank has to run them: trained on the past, scored on the future,
-with no leakage.
+Criminals move dirty money through chains of ordinary-looking accounts, known as money mules.
+Banks try to catch this by flagging suspicious transactions, but most alerts are false and each
+one costs an analyst's time. This project tests two practical questions:
+
+1. Does looking at *who pays whom* (the transaction network) catch more laundering with fewer
+   false alerts? And does that need a graph neural network, or just better inputs to a standard
+   model?
+2. When criminals change tactics, can the system tell that its own predictions have gone wrong
+   before anyone has labelled the new cases?
+
+It answers them on two public datasets, Bitcoin transactions and a simulated bank with 5 million
+transactions, and tests the models the way a bank would have to run them: trained on the past,
+scored on the future, never allowed to peek ahead.
+
+## What I found
+
+- **Graph features cut an analyst's alert queue about 6×.** On 5 million simulated bank
+  transactions, adding network patterns (money fanning in, fanning out, or splitting and
+  regathering, computed only from past transactions) cuts the alerts an analyst opens per real
+  laundering case from 26 to 4.4 while still catching half of the cases. The graph neural network I
+  tested added nothing on top.
+- **How you test the model changes the answer more than which model you pick.** The score used
+  here is F1, from 0 to 1, which rewards catching laundering and penalises false alarms. Tested on a
+  random shuffle of the data, which lets the model see the future, every model scores 0.90–0.96.
+  Tested honestly, training on earlier weeks and scoring later ones, they score 0.56–0.78, and the
+  tree models match published results. The toolkit only reports the honest version as the headline.
+- **When criminal behaviour changed, no label-free alarm warned in time.** After a dark market shut
+  down (time step 43 of 49 in the Bitcoin data), every model's F1 fell to near zero. None of four
+  drift detectors, which compare today's data with the training data without knowing which
+  transactions were criminal, warned of it. Only retraining on freshly labelled cases recovered the
+  models, and slowly. The practical lesson: budget for fast labelling and scheduled retraining,
+  and don't rely on drift alarms alone.
+
+![Alerts per real case caught](report/figures/readme_alert_load.png)
+
+*XGBoost on AMLworld HI-Small, test days 8–9 (862,792 transactions, 956 laundering). Days 10–17
+are left out because the simulator stops ordinary traffic there and 59% of what remains is
+laundering, which flatters every model. Regenerate with `scripts/readme_figures.py`.*
 
 ## What it does
 
@@ -15,10 +49,11 @@ with no leakage.
 uv run mulegraph score --config configs/amlworld_score.yaml   # one day of AMLworld, ~3 min, ~6 GB RAM
 ```
 
-The first call fits the model and saves it with its validation-chosen threshold; later days reuse
-both. Day 8 is 654,467 transactions and produces 466 alerts, ranked by score
-(`report/tables/amlworld_batch8_alerts.csv`; the last column is how much each feature pushed the
-score toward laundering, in log-odds):
+The tool scores one day of transactions and hands an analyst a ranked queue of alerts, each with
+the reasons behind it. The first call fits the model and saves it with its decision threshold,
+chosen on validation data; later days reuse both. Day 8 is 654,467 transactions and produces 466
+alerts (`report/tables/amlworld_batch8_alerts.csv`; the last column is how much each feature
+pushed the score toward laundering, in log-odds):
 
 ```text
 rank  score   from -> to          why
@@ -27,19 +62,13 @@ rank  score   from -> to          why
 3     0.9997  326565 -> 264765  payment_format +3.26; gfp_fan_in_bin8 +1.82; gfp_degree_in_bin8 +0.89
 ```
 
-It also writes a health check (`report/tables/amlworld_batch8_health.json`) that asks whether
-today looks like the days the model was fitted on. PSI and KS compare the input features, and
-score-shift and alert-rate compare the model's own scores; none of them sees a label. The command
-exits 3 when a detector flags the day, so a scheduler can stop trusting the queue. It also writes a
-one-page HTML report of both (`..._report.html`: a figure, the detector table, the top 25 alerts and
-the provenance; it opens in any browser and loads nothing from outside):
-
-```text
-day 8   exit 0   psi 0.82/1.65   ks 0.74/0.91   conf 0.07/0.10   alert 0.05/0.94
-day 10  exit 3   psi 8.74/1.65*  ks 0.67/0.91   conf 0.74/0.10*  alert 5.99/0.94*
-```
-
-Each cell is the day's score over that detector's flag level, and `*` marks a flag.
+It also runs a health check that asks whether today looks like the days the model was trained on,
+without using any labels. If the check flags the day, the command exits with code 3, so a scheduler
+can stop trusting the queue. On the simulator it stays quiet on the normal days 8 and 9 and flags
+day 10, where ordinary traffic stops. Both go into a one-page HTML report
+(`..._report.html`: a figure, the detector table, the top 25 alerts and the provenance) that opens
+in any browser and loads nothing from outside. The detector output is under
+[Engineering](#engineering).
 
 **What this does and does not show.** The data is a bank simulator, not a real bank. Day 10 is the
 simulator's laundering tail, where ordinary traffic stops and 396 transactions remain, so it is
@@ -49,27 +78,6 @@ a subtle shift. On the real collapse in the Bitcoin data, no detector warned in 
 against the labels afterwards, the day-8 queue has F1 0.38
 (`report/tables/amlworld_xgb_curves.csv`). Both days' outputs are committed and stamped with the
 commit that produced them; set `batch: 10` in the config to reproduce day 10.
-
-## What I found
-
-- **Graph features cut an analyst's alert queue about 6×.** On 5 million simulated bank
-  transactions, adding causal graph features (fan-in, fan-out, scatter-gather, computed only from
-  past transactions) takes the alerts opened per real laundering case from 26 to 4.4 at 50% recall.
-  The graph neural network I tested added nothing on top.
-- **The evaluation method changes the answer more than the model does.** Scored on a random split,
-  which lets the model see the future, every model gets F1 0.90–0.96. On the honest temporal split
-  they get 0.56–0.78, and the tree models match published results. The toolkit only reports the
-  honest version as the headline.
-- **When criminal behaviour changed, no label-free alarm warned in time.** After a dark-market
-  shutdown in the Bitcoin data, every model's F1 fell to near zero and none of four label-free drift
-  detectors warned of it. Only retraining on fresh labels recovered it, and slowly. The practical
-  lesson: budget for fast labelling and scheduled retraining, don't rely on drift alarms alone.
-
-![Alerts per real case caught](report/figures/readme_alert_load.png)
-
-*XGBoost on AMLworld HI-Small, test days 8–9 (862,792 transactions, 956 laundering). Days 10–17
-are left out because the simulator stops ordinary traffic there and 59% of what remains is
-laundering, which flatters every model. Regenerate with `scripts/readme_figures.py`.*
 
 ## Quickstart
 
@@ -141,6 +149,15 @@ flowchart LR
 - **Quality gates.** 186 tests (87% line coverage without the real-data tests), ruff lint and
   format, and the smoke run on every push through GitHub Actions. Every change goes through a
   branch and a pull request.
+- **A health check that never sees a label.** PSI and KS compare the input features with the
+  reference window; score-shift and alert-rate compare the model's own scores. The health file
+  (`report/tables/amlworld_batch8_health.json`) records each detector's score against its flag
+  level, and `*` marks a flag:
+
+  ```text
+  day 8   exit 0   psi 0.82/1.65   ks 0.74/0.91   conf 0.07/0.10   alert 0.05/0.94
+  day 10  exit 3   psi 8.74/1.65*  ks 0.67/0.91   conf 0.74/0.10*  alert 5.99/0.94*
+  ```
 - **Built for a laptop.** AMLworld's 5.1M transactions and 515k accounts run through feature
   building and XGBoost on a 7 GB machine in 8 minutes (peak 5 GB), feeding the graph-feature
   engine 425 hourly batches in time order.
