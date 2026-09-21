@@ -25,7 +25,7 @@ mulegraph/
   models/           # xgb, sage behind one fit/predict_proba protocol
   eval/             # Thresholding, metrics, seed t-intervals, curves.py (per-timestep)
   drift/            # detectors.py (PSI, KS, confidence shift, alert rate), monitor.py (batch scores, lead time)
-  report/           # tables.py (MLflow -> CSV), figures.py (curves, drift PNG)
+  report/           # tables.py (MLflow -> CSV), figures.py (curves, drift PNG), html.py (score page)
 configs/            # One YAML per experiment; validated with Pydantic
 tests/
 docs/
@@ -35,7 +35,7 @@ docs/
 
 **Drift data flow:** same to the fit, then score every unit from the validation window on → PSI / KS / confidence shift per batch against the validation reference → lead time against the F1 curve → tables + figure.
 
-**Score data flow (D5):** same load, features and split → fit once and cache the model plus its validation threshold → score one batch → ranked alert queue + label-free health check → exit 3 on a flag.
+**Score data flow (D5):** same load, features and split → fit once and cache the model plus its validation threshold → score one batch → ranked alert queue + label-free health check + static HTML page → exit 3 on a flag.
 
 **Component coupling rule:** every component depends only on the shared types in `types.py`. Only `pipeline.py` imports across subsystems.
 

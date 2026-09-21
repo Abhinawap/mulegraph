@@ -30,7 +30,9 @@ rank  score   from -> to          why
 It also writes a health check (`report/tables/amlworld_batch8_health.json`) that asks whether
 today looks like the days the model was fitted on. PSI and KS compare the input features, and
 score-shift and alert-rate compare the model's own scores; none of them sees a label. The command
-exits 3 when a detector flags the day, so a scheduler can stop trusting the queue:
+exits 3 when a detector flags the day, so a scheduler can stop trusting the queue. It also writes a
+one-page HTML report of both (`..._report.html`: a figure, the detector table, the top 25 alerts and
+the provenance; it opens in any browser and loads nothing from outside):
 
 ```text
 day 8   exit 0   psi 0.82/1.65   ks 0.74/0.91   conf 0.07/0.10   alert 0.05/0.94
@@ -90,10 +92,12 @@ INFO  batch 38: 51 nodes scored, 3 alerts at threshold 0.9081, health no_drift_f
 smoke OK: report/tables/smoke_results.csv
 alerts: report/tables/smoke_batch38_alerts.csv
 health: report/tables/smoke_batch38_health.json
+report: report/tables/smoke_batch38_report.html
 ```
 
-The smoke run ends by scoring one batch the way `mulegraph score` does: a ranked alert queue and a
-health check on whether to trust the scores.
+The smoke run ends by scoring one batch the way `mulegraph score` does: a ranked alert queue, a
+health check on whether to trust the scores, and an HTML report of both. Open the report in a
+browser to see what a person receives.
 
 Every experiment is one YAML file, and results go to files, not stdout:
 

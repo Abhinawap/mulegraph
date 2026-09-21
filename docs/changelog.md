@@ -4,6 +4,14 @@ Project history, newest first. Add a dated entry for every tag and every change 
 
 ---
 
+## Unreleased
+
+### 21 Sep 2026 — A static HTML report for every scored batch
+- **Added** `report/html.py` and a third output of `mulegraph score`: `<name>_batch<d>_report.html`, one self-contained page (no scripts, nothing loaded from outside, the figure embedded) with a banner saying whether a detector flagged the day, each detector's score beside its flag level as a figure and a table, the top 25 alerts, and the provenance (scored-at and fitted-at commits, threshold, reference window, dataset, feature and split hashes). The caution from the health file, that no flag is not an all-clear, is on the page. `score` and `smoke` now print the report's path; `run_score` returns it as its third value. Design D5, §3.4a.
+- **Checked** without a browser, since none is installed here: the tags balance (a parser walks both variants), there is no script and no external reference, and the embedded figure is a valid image showing the flagged detectors of day 10 in orange above their flag levels and day 8 entirely below. **The rendered layout has not been looked at**, so the CSS is unverified beyond that.
+- **Tests** (`tests/test_score.py`): the page names every detector and both commits, says "Drift flagged" exactly when the health file does, and loads nothing; what the data supplies (feature names, the note) is escaped, and the queue is cut at 25 rows (turning escaping off fails it); the shifted-batch CLI test also checks the page.
+- **Not added:** the day-8 and day-10 pages are not committed. GitHub shows HTML as source, so a visitor could not see them without cloning, and `mulegraph smoke` builds one in about 15 s with no download.
+
 ## v1.1 — 21 Sep 2026
 
 `mulegraph score` becomes usable. In `v1.0` its health check flagged every AMLworld test day, so exit status 3 carried no signal there. `v1.1` adds a configurable health-check reference window (`reference: [0, 7]` in `configs/amlworld_score.yaml`): it exits 0 on days 8 and 9 and 3 on day 10, the laundering tail. The window was chosen after looking at those days, so that is a sensitivity check, not a held-out result, and day 10 is the easiest drift there is; the Elliptic result (no detector warned of t43) is unchanged. `mulegraph smoke` now also scores a batch, so CI exercises the score path, and the README opens with what `score` does, with real day-8 and day-10 outputs committed under `report/tables/`.

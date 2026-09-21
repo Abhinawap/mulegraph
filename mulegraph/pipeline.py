@@ -34,6 +34,7 @@ from mulegraph.features.select import select_features
 from mulegraph.models import get_model
 from mulegraph.models.base import BaseModel, FitInfo
 from mulegraph.report.figures import plot_curves, plot_drift
+from mulegraph.report.html import write_score_report
 from mulegraph.report.tables import write_results_table
 from mulegraph.splits.builder import build_split, rolling_steps
 from mulegraph.types import FeatureMatrix, GraphDataset, Predictions, Split
@@ -597,8 +598,8 @@ def _deployed_model(
     return model, meta
 
 
-def run_score(cfg: ScoreConfig) -> tuple[Path, Path, list[str]]:
-    """Score one batch: a ranked alert queue and a label-free health check (D5, PR-R2)."""
+def run_score(cfg: ScoreConfig) -> tuple[Path, Path, Path, list[str]]:
+    """Score one batch: alert queue, label-free health check, HTML page (D5, PR-R2)."""
     paths = Paths.from_env()
     device = resolve_device(cfg.device)
     commit = _stamp()
@@ -695,6 +696,7 @@ def run_score(cfg: ScoreConfig) -> tuple[Path, Path, list[str]]:
         "while no detector held a flag for two batches (docs/methods.md §12.4-12.5)",
     }
     health_path.write_text(json.dumps(report, indent=2) + "\n")
+    page_path = write_score_report(tables_dir / f"{stem}_report.html", report, alerts)
     log.info(
         "batch %d: %d %ss scored, %d alerts at threshold %.4f, health %s",
         cfg.batch,
@@ -704,10 +706,10 @@ def run_score(cfg: ScoreConfig) -> tuple[Path, Path, list[str]]:
         threshold,
         report["status"],
     )
-    return alerts_path, health_path, flagged
+    return alerts_path, health_path, page_path, flagged
 
 
-def _smoke_score(cfg: RunConfig) -> tuple[Path, Path]:
+def _smoke_score(cfg: RunConfig) -> tuple[Path, Path, Path]:
     """Score the first test batch with configs/amlworld_score.yaml's health settings (D5)."""
     regime = cfg.split.regimes[0]
     assert regime.val is not None and regime.test is not None
@@ -723,12 +725,12 @@ def _smoke_score(cfg: RunConfig) -> tuple[Path, Path]:
         batch=regime.test[0],
         device=cfg.device,
     )
-    alerts, health, _ = run_score(score_cfg)
-    return alerts, health
+    alerts, health, page, _ = run_score(score_cfg)
+    return alerts, health, page
 
 
-def run_smoke(keep: bool = False) -> tuple[Path, Path, Path]:
-    """Benchmark then one scored batch on a synthetic graph: results, alert queue, health (D5)."""
+def run_smoke(keep: bool = False) -> tuple[Path, Path, Path, Path]:
+    """Benchmark then one scored batch on a synthetic graph: results, queue, health, page (D5)."""
     if not SMOKE_CONFIG.is_file():
         raise FileNotFoundError(
             f"smoke config not found at {SMOKE_CONFIG}; `mulegraph smoke` runs from a checkout "
