@@ -4,6 +4,16 @@ Project history, newest first. Add a dated entry for every tag and every change 
 
 ---
 
+## Unreleased
+
+### 21 Sep 2026 — `mulegraph score`: the deployed scoring path (D5)
+- **Added** `mulegraph score --config <yaml>`: one XGBoost model scores one batch and writes a ranked alert queue (account ids, top three TreeSHAP contributions per alert) and a label-free health check from the existing drift detectors. It exits 3 when a detector flags, so a scheduler can act on it. The model and its validation threshold are fitted once, cached under the dataset, feature and split hashes, and reused. Design D5, §3.4a; `configs/amlworld_score.yaml`.
+- **Verified** on AMLworld HI-Small from a cold model cache: day 8 in 66 s at 5.8 GB peak RSS (654,467 transactions, 466 alerts), day 9 in 14 s from the saved model. Threshold 0.991463 and per-day F1 0.3837 and 0.4538, recomputed offline from the alert queues, match the `amlworld_xgb` benchmark to four decimals.
+- **Found** that the health check flags every AMLworld test day. With a two-day reference (days 6–7), each calibrated flag level comes from a single leave-one-out comparison of two near-identical days (PSI flags at 0.0002 against the fixed default of 0.2), and KS at 650k rows per day rejects on almost any difference. Recorded as found; the reference window is the validation window by design (D4), and separating the two is a design change not yet made.
+- **Fixed before merge, from the integrity audit:** alert explanations summed TreeSHAP over every tree in the booster, including the 50 that early stopping keeps past the best iteration, so an alert's listed reasons could differ from what drove its score by up to 4.2 log-odds; they now use the same trees as `predict_proba` (to 1e-6), with a test that fails on the old code. The model cache key now also covers the resolved device and the XGBoost version (GPU and CPU `hist` grow different trees). The fit's commit, seed, device, params and library version are written beside the model and copied into every health file as `model_fit`, because a cache hit otherwise stamps only the commit that scored, not the one that fitted.
+- **Split** `DriftConfig` into `DetectorConfig` (the detectors) and `DriftConfig` (adds the label-side lead-time rule), so `score` takes no field it would ignore.
+- **Tests** (`tests/test_score.py`): one threshold call on validation rows only (PR-E4); a second batch reuses the model; unlabelling the scored batch and fitting cold in a fresh directory leaves the threshold, queue and health file identical (PR-R2; a planted label leak fails it); a changed definition forces a refit; a shifted batch exits 3; and the config refuses SAGE, a batch outside the test window and a non-temporal regime, saying why.
+
 ## v1.0 — 21 Sep 2026
 
 Portfolio release. The two-by-two benchmark runs end to end on both datasets, and the answer is the same on each: graph *features* help, a graph *model* does not. XGBoost with causal GFP features beats GraphSAGE on Elliptic++ and on AMLworld HI-Small, every paired-by-seed interval excluding zero (methods §12.3).

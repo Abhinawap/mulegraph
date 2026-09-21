@@ -7,6 +7,8 @@ test that depends on them would be testing three components at once.
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import numpy as np
 import pytest
 
@@ -139,3 +141,29 @@ def test_trial0_is_applied_under_config_overrides() -> None:
     assert get_model("xgb", params={}).params["early_stopping_rounds"] == 50
     model = get_model("xgb", params={"n_estimators": 20})
     assert model.params == {"n_estimators": 20, "early_stopping_rounds": 50}
+
+
+def test_contributions_explain_the_score_predict_proba_gives(fitted: Fitted) -> None:
+    """D5: each alert's reasons come from the same trees as its score, not the full booster."""
+    model, data, feats, split, info = fitted
+    assert info.best_iteration is not None
+    assert model.clf is not None and model.clf.get_booster().num_boosted_rounds() > (
+        info.best_iteration + 1
+    ), "fixture must early-stop, or the tree range is untested"
+    p = model.predict_proba(data, feats, split.test).astype(np.float64)
+    logit = np.log(p / (1 - p))
+    # Contributions without the bias column: what is left over must be one constant, the bias.
+    bias = logit - model.contributions(feats, split.test).sum(axis=1)
+    assert np.ptp(bias) < 1e-3
+
+
+def test_save_and_load_give_the_same_scores(fitted: Fitted, tmp_path: Path) -> None:
+    model, data, feats, split, _ = fitted
+    model.save(tmp_path / "m.ubj")
+    loaded = XGBModel.load(tmp_path / "m.ubj")
+    np.testing.assert_array_equal(
+        loaded.predict_proba(data, feats, split.test), model.predict_proba(data, feats, split.test)
+    )
+    np.testing.assert_array_equal(
+        loaded.contributions(feats, split.test), model.contributions(feats, split.test)
+    )
