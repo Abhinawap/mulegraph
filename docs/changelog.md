@@ -6,6 +6,11 @@ Project history, newest first. Add a dated entry for every tag and every change 
 
 ## Unreleased
 
+### 21 Sep 2026 — README leads with `mulegraph score`
+- **Changed** the README to open with what the tool does for a user: a new "What it does" section above "What I found" shows a real day-8 alert queue (top three rows with the features behind each alert) and the health check on day 8 (exit 0) and day 10 (exit 3), with the limits stated beside it: simulator data, day 10 is the easiest drift there is, and the reference window was chosen after seeing those days. The tagline now describes the score command first and the benchmark second, and the run list gains the `score` line.
+- **Added** `report/tables/amlworld_batch{8,10}_{alerts.csv,health.json}`, from `configs/amlworld_score.yaml` on a clean tree at `b584125` (the health files carry that stamp): 654,467 transactions and 466 alerts on day 8, 396 and 136 on day 10. Threshold 0.9915 on both. Day 10 flags PSI, score shift and alert rate.
+- **Found** while producing them: `git status --porcelain` counts untracked files, so the first day's output files made the next run's stamp `-dirty`. Each day's outputs are now moved out of the tree before the next run.
+
 ### 21 Sep 2026 — `mulegraph smoke` also runs the scoring path
 - **Changed** `mulegraph smoke` to finish by scoring the first test batch with the model and settings of `configs/amlworld_score.yaml` (calibrated detectors, all history before the test window as the health reference) and to print the alert queue and health file it wrote. CI runs smoke on every push, so the product path is now exercised there, and the no-download first run produces an alert queue rather than only a results table. About 15 s; outputs land in the gitignored `report/tables/smoke_*`.
 - **Found** while building it: with the score command's default detectors (fixed flag levels, validation window as reference), the synthetic graph's batch 38 reads `drift_flagged` on data with no drift. Each synthetic batch has 51 units, so PSI (1.18 against 0.2) and alert rate (0.86 against 0.5) are sampling noise. The smoke step uses the shipped settings instead, which report no drift (PSI 0.90 against a calibrated 2.3). That setting was fixed before looking at the result, not adjusted to it.
