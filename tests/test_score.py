@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import dataclasses
 import json
+import re
 from pathlib import Path
 from typing import Any
 
@@ -20,6 +21,7 @@ from typer.testing import CliRunner
 from mulegraph import pipeline
 from mulegraph.cli import EXIT_DRIFT, app
 from mulegraph.config import ScoreConfig
+from mulegraph.report.html import TOP_ALERTS, write_score_report
 
 BATCH = 10
 
@@ -190,6 +192,61 @@ def test_a_shifted_batch_exits_with_the_drift_status(
     )
     assert health["status"] == "drift_flagged"
     assert "psi" in health["flagged"]
+    assert (
+        "Drift flagged by"
+        in (tmp_path / "report" / "tables" / f"score_test_batch{BATCH}_report.html").read_text()
+    )
+
+
+def test_the_report_page_is_self_contained_and_matches_the_health_file(
+    score_cfg: ScoreConfig,
+) -> None:
+    """D5: the page a person opens says what the health file says, and loads nothing else."""
+    _, health_path, page_path, _ = pipeline.run_score(score_cfg)
+    health, page = json.loads(health_path.read_text()), page_path.read_text()
+
+    assert page_path.name == f"score_test_batch{BATCH}_report.html"
+    for d in health["detectors"]:
+        assert d["detector"] in page
+    assert health["commit"] in page and health["model_fit"]["commit"] in page
+    assert ("Drift flagged" in page) == (health["status"] == "drift_flagged")
+    assert "<script" not in page
+    assert not re.findall(r'(?:src|href)="(?!data:)', page), "the page must not load anything"
+
+
+def test_the_report_escapes_what_the_data_supplies_and_truncates_the_queue(tmp_path: Path) -> None:
+    fit = dict.fromkeys(
+        [
+            "commit",
+            "model",
+            "device",
+            "xgboost",
+            "dataset_version",
+            "feature_version",
+            "split_hash",
+        ],
+        "x",
+    )
+    health = {
+        "batch": 3, "flagged": [], "reference_batches": [0, 1], "units_scored": 40, "alerts": 30,
+        "threshold": 0.9, "commit": "abc", "model_fit": fit, "note": "a <note>",
+        "detectors": [{"detector": "psi", "score": 0.1, "flag_at": 0.2}],
+    }  # fmt: skip
+    alerts = pd.DataFrame(
+        {
+            "rank": range(1, 31),
+            "unit": range(30),
+            "score": 0.99,
+            "top_features": "<script>alert(1)</script> +1.0",
+        }
+    )
+
+    page = write_score_report(tmp_path / "p.html", health, alerts).read_text()
+
+    assert "<script>alert" not in page and "&lt;script&gt;alert" in page
+    assert "a &lt;note&gt;" in page
+    assert f"Top {TOP_ALERTS} of 30" in page
+    assert page.count("&lt;script&gt;alert") == TOP_ALERTS
 
 
 @pytest.mark.parametrize(

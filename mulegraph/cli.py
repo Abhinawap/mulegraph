@@ -70,8 +70,11 @@ def smoke(
     """End-to-end check on a synthetic graph: a benchmark, then one scored batch. Used in CI."""
     from mulegraph.pipeline import run_smoke
 
-    table, alerts, health = run_smoke(keep=keep)
-    typer.secho(f"smoke OK: {table}\nalerts: {alerts}\nhealth: {health}", fg=typer.colors.GREEN)
+    table, alerts, health, page = run_smoke(keep=keep)
+    typer.secho(
+        f"smoke OK: {table}\nalerts: {alerts}\nhealth: {health}\nreport: {page}",
+        fg=typer.colors.GREEN,
+    )
 
 
 @app.command()
@@ -114,11 +117,11 @@ def score(config: ConfigOption) -> None:
         _fail(f"Invalid config {config}: {exc}")
 
     try:
-        alerts, health, flagged = run_score(cfg)
+        alerts, health, page, flagged = run_score(cfg)
     except (FileNotFoundError, ValueError) as exc:
         _fail(str(exc))
 
-    typer.secho(f"alerts: {alerts}\nhealth: {health}", fg=typer.colors.GREEN)
+    typer.secho(f"alerts: {alerts}\nhealth: {health}\nreport: {page}", fg=typer.colors.GREEN)
     if flagged:
         typer.secho(
             f"drift flagged on batch {cfg.batch} by {', '.join(flagged)}; the scores may not "
