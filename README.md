@@ -61,7 +61,7 @@ The datasets are public but not redistributed: put
 [Elliptic++](https://github.com/git-disl/EllipticPlusPlus) under `data/raw/elliptic_pp/2023.1/` and
 [AMLworld HI-Small](https://www.kaggle.com/datasets/ealtman2019/ibm-transactions-for-anti-money-laundering-aml)
 under `data/raw/amlworld/hi_small/`. The GraphSAGE grid on AMLworld needs more memory than a
-laptop; `kaggle/amlworld_sage.md` runs it on a free Kaggle P100 in 74 minutes.
+laptop; `kaggle/amlworld_sage.md` runs it on a free Kaggle T4 in 74 minutes.
 
 ## Engineering
 
