@@ -86,6 +86,7 @@ All code is written under the **ponytail** skill (`/ponytail`, full level). Befo
 
 - ALWAYS branch before major changes: `feature/description` or `fix/description`. NEVER commit directly to `main`.
 - Run `ruff check .` and `pytest` before pushing. NEVER force push to `main`.
+- Changes to splits, features, evaluation, thresholding, drift or model fitting: commit and open the PR only after the `integrity-auditor` agent returns PASS on the final diff; re-audit after every fix.
 - Commit messages describe the change and, where relevant, the requirement ID it satisfies (e.g. `PR-F2`).
 - Keep commits focused on single changes.
 
