@@ -109,6 +109,7 @@ uv run mulegraph smoke                     # ~15 s, synthetic graph, benchmark +
 # Quality
 uv run ruff check . && uv run ruff format .
 uv run pytest --cov=mulegraph
+uv run python scripts/dump_outputs.py before/   # refactor check: dump on the branch too, diff -r
 
 # Tracking
 uv run mlflow ui --backend-store-uri sqlite:///mlruns/mlflow.db
