@@ -213,10 +213,10 @@ def test_run_benchmark_writes_per_timestep_curves_and_figure(
 
 
 @pytest.mark.parametrize("config", ["tiny_config", "rolling_config"])
-def test_every_logged_test_f1_is_scored_at_its_runs_validation_optimum(
+def test_every_logged_f1_is_scored_at_its_runs_validation_optimum(
     config: str, request: pytest.FixtureRequest
 ) -> None:
-    """PR-E4 end to end: each child run's threshold and test F1 re-derive from its predictions."""
+    """PR-E4 end to end: each child run's threshold and every F1 it logs re-derive from its rows."""
     import mlflow
     from sklearn.metrics import f1_score
 
@@ -228,19 +228,64 @@ def test_every_logged_test_f1_is_scored_at_its_runs_validation_optimum(
         experiment_names=[cfg.mlflow.experiment], filter_string="tags.kind = 'child'"
     )
     assert len(runs) == len(cfg.models) * len(cfg.seeds)
+    curves = pd.read_csv(Paths.from_env().tables_dir() / f"{cfg.mlflow.experiment}_curves.csv")
     for run_id in runs["run_id"]:
         path = mlflow.artifacts.download_artifacts(
             run_id=run_id, artifact_path="predictions.parquet"
         )
         frame = pd.read_parquet(path)
         val, test = frame[frame["part"] == "val"], frame[frame["part"] == "test"]
-        logged = client.get_run(run_id).data.metrics
+        run = client.get_run(run_id)
+        logged, tags = run.data.metrics, run.data.tags
         # On a rolling run the stored val rows and the scalar threshold are the last step's.
         assert logged["threshold"] == choose_threshold(val["y"], val["proba"])[0]
         # Each rolling test batch is decided at its own step's threshold, logged at step=t.
         by_step = {m.step: m.value for m in client.get_metric_history(run_id, "ts_threshold")}
         thr = test["time"].map(by_step).to_numpy() if by_step else logged["threshold"]
-        assert logged["test_f1"] == pytest.approx(f1_score(test["y"], test["proba"] >= thr))
+        y, time = test["y"].to_numpy(), test["time"].to_numpy()
+        hits = test["proba"].to_numpy() >= thr
+        assert logged["test_f1"] == pytest.approx(f1_score(y, hits))
+        # The per-timestep curve, which drift's lead time reads, is scored at it too (PR-E5).
+        per_batch = {
+            int(t): f1_score(y[time == t], hits[time == t], zero_division=0.0)
+            for t in np.unique(time)
+        }
+        ts_f1 = {m.step: m.value for m in client.get_metric_history(run_id, "ts_f1")}
+        assert ts_f1 == pytest.approx(per_batch)
+        # So is the curves table the figure is drawn from (PR-E5).
+        mine = curves[
+            (curves["model"] == tags["model"])
+            & (curves["features"] == tags["features"])
+            & (curves["seed"] == int(run.data.params["seed"]))
+        ]
+        assert dict(zip(mine["time"], mine["f1"], strict=True)) == pytest.approx(per_batch)
+
+
+def test_every_logged_rolling_step_threshold_is_its_own_validation_optimum(
+    rolling_config: RunConfig,
+) -> None:
+    """PR-E4, PR-E7 end to end: each logged ts_threshold is its step's own validation optimum."""
+    import mlflow
+
+    pipeline.run_benchmark(rolling_config, pipeline.SMOKE_CONFIG)
+    data, feats, cache_dir = _base_inputs(rolling_config)
+    regime = rolling_config.split.regimes[0]
+    steps = [build_split(data, s, cache_dir) for s in rolling_steps(regime)]
+    mlflow.set_tracking_uri(rolling_config.mlflow.resolved_uri())
+    client = mlflow.MlflowClient()
+    runs = mlflow.search_runs(
+        experiment_names=[rolling_config.mlflow.experiment], filter_string="tags.kind = 'child'"
+    )
+    assert len(runs) == len(rolling_config.seeds)
+    for run_id, seed in zip(runs["run_id"], runs["params.seed"], strict=True):
+        # Only the last step's validation rows are stored, so each step is refitted alone.
+        expected = {}
+        for step in steps:
+            alone = pipeline.fit(data, feats, [step], rolling_config.models[0], int(seed), "cpu")
+            assert alone.threshold == choose_threshold(alone.val.y, alone.val.proba)[0]
+            expected[step.params["test"][0]] = alone.threshold
+        history = client.get_metric_history(run_id, "ts_threshold")
+        assert {m.step: m.value for m in history} == expected
 
 
 def test_the_threshold_is_the_validation_optimum_applied_to_every_test_row(
