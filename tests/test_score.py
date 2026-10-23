@@ -55,31 +55,24 @@ def _outputs(alerts: Path, health: Path) -> tuple[pd.DataFrame, dict[str, Any]]:
     return pd.read_csv(alerts), json.loads(health.read_text())
 
 
-def test_queue_is_ranked_and_cut_at_the_validation_threshold(
-    score_cfg: ScoreConfig, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """PR-E4: one threshold call, on validation rows only; every alert sits at or above it."""
+def test_queue_is_ranked_and_cut_at_the_validation_threshold(score_cfg: ScoreConfig) -> None:
+    """PR-E4: the queue is cut at the threshold fit() picks on validation; alerts sit above it."""
+    from mulegraph.eval.threshold import choose_threshold
+    from mulegraph.features.builder import build_features
+    from mulegraph.features.select import select_features
     from mulegraph.splits.builder import build_split
     from mulegraph.util import Paths
 
-    seen: list[int] = []
-    real = pipeline.choose_threshold
-
-    def spy(y_val: np.ndarray, p_val: np.ndarray) -> tuple[float, float]:
-        seen.append(int(np.asarray(y_val).size))
-        return real(y_val, p_val)
-
-    monkeypatch.setattr(pipeline, "choose_threshold", spy)
     alerts, health = _outputs(*pipeline.run_score(score_cfg)[:2])
 
     paths = Paths.from_env()
     data = pipeline.load_dataset(score_cfg.dataset, paths.data_dir)
-    split = build_split(
-        data,
-        score_cfg.split.regimes[0],
-        paths.cache_dir(score_cfg.dataset.name, score_cfg.dataset.version),
-    )
-    assert seen == [split.val.size]
+    cache_dir = paths.cache_dir(score_cfg.dataset.name, score_cfg.dataset.version)
+    feats = select_features(data, build_features(data, score_cfg.features, cache_dir), "base_gfp")
+    split = build_split(data, score_cfg.split.regimes[0], cache_dir)
+    fitted = pipeline.fit(data, feats, [split], score_cfg.model, 0, "cpu")
+    assert fitted.threshold == choose_threshold(fitted.val.y, fitted.val.proba)[0]
+    assert health["threshold"] == fitted.threshold
     assert len(alerts) == health["alerts"] > 0
     assert (alerts["score"] >= health["threshold"]).all()
     assert alerts["score"].is_monotonic_decreasing
@@ -95,13 +88,13 @@ def test_a_second_batch_reuses_the_deployed_model(
 ) -> None:
     """One fit per definition: the next day is scored by the same model at the same threshold."""
     fits: list[int] = []
-    real = pipeline._fit_predict
+    real = pipeline.fit
 
     def counting(*args: Any, **kwargs: Any) -> Any:
         fits.append(1)
         return real(*args, **kwargs)
 
-    monkeypatch.setattr(pipeline, "_fit_predict", counting)
+    monkeypatch.setattr(pipeline, "fit", counting)
     _, first = _outputs(*pipeline.run_score(score_cfg)[:2])
     _, second = _outputs(*pipeline.run_score(ScoreConfig.model_validate(_raw(batch=11)))[:2])
 
@@ -120,10 +113,8 @@ def test_a_longer_reference_changes_the_health_check_and_not_the_model(
 ) -> None:
     """D5: the reference window is a health-check setting; the fitted model and threshold stay."""
     fits: list[int] = []
-    real = pipeline._fit_predict
-    monkeypatch.setattr(
-        pipeline, "_fit_predict", lambda *a, **k: (fits.append(1), real(*a, **k))[1]
-    )
+    real = pipeline.fit
+    monkeypatch.setattr(pipeline, "fit", lambda *a, **k: (fits.append(1), real(*a, **k))[1])
     _, default = _outputs(*pipeline.run_score(score_cfg)[:2])
     wide = ScoreConfig.model_validate(_raw(reference=[3, 9]))
     _, longer = _outputs(*pipeline.run_score(wide)[:2])
