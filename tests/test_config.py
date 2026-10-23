@@ -69,6 +69,12 @@ def test_temporal_boundaries_must_be_ordered() -> None:
         )
 
 
+def test_a_one_batch_rolling_window_is_refused() -> None:
+    one_batch = {"regime": "temporal_rolling", "train_end": 34, "val": [35, 37], "test": [38, 38]}
+    with pytest.raises(ValidationError, match="use regime: temporal"):
+        _cfg(split={"regimes": [one_batch]})
+
+
 def test_duplicate_regimes_rejected() -> None:
     with pytest.raises(ValidationError, match="duplicates"):
         _cfg(split={"regimes": [{"regime": "random"}, {"regime": "random"}]})

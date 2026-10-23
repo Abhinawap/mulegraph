@@ -176,7 +176,7 @@ Detectors are plain functions over `(reference, current)` arrays: `psi`, `ks_fra
 
 **Models.** `xgb`: `scale_pos_weight` from the training split, early stopping on validation PR-AUC, `n_estimators = 1000` ceiling. `sage`: inputs z-scored with train-row statistics, two `SAGEConv` layers, `NeighborLoader` fan-out [15, 10], class-weighted BCE, full-batch inference; early stopping on validation PR-AUC.
 
-**Threshold.** Maximise F1 on the validation PR curve; ties go to the higher threshold. The pipeline scores test once with it; a test spies on `choose_threshold` to prove it only ever sees validation.
+**Threshold.** Maximise F1 on the validation PR curve; ties go to the higher threshold. The pipeline scores test once with it; a test re-derives every logged threshold from that run's own validation predictions, and its test F1 from that threshold, so a threshold searched on test fails the build.
 
 **Metrics.** Illicit-class F1 at the validation threshold, PR-AUC (average precision), ROC-AUC (secondary), precision at recall 0.5 and 0.8 (curve metrics that never set a threshold). Accuracy is refused at the source.
 

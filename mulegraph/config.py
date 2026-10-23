@@ -110,6 +110,11 @@ class RegimeConfig(Strict):
                 f"regime {self.regime!r} needs train_end < val[0] <= val[1] < test[0] <= test[1], "
                 f"got train_end={self.train_end}, val={self.val}, test={self.test}"
             )
+        if self.regime == "temporal_rolling" and self.test[0] == self.test[1]:
+            raise ValueError(
+                f"temporal_rolling needs at least two test batches, got test={self.test}: with "
+                "one it refits once and is the temporal regime, so use regime: temporal (PR-E7)"
+            )
         return self
 
     @property

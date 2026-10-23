@@ -1,7 +1,7 @@
 """End-to-end orchestration on a synthetic graph (PR-E4, PR-O1).
 
-The integrity assertion is that ``choose_threshold`` only ever sees validation
-rows: the pipeline is the one place test data could reach it.
+The integrity assertion is that every threshold is the optimum of validation rows
+alone: ``pipeline.fit`` is the one place test data could reach it.
 """
 
 from __future__ import annotations
@@ -15,7 +15,13 @@ import pytest
 
 from mulegraph import pipeline
 from mulegraph.config import RunConfig
+from mulegraph.data import load_dataset
+from mulegraph.eval.threshold import choose_threshold
+from mulegraph.features.select import select_features
 from mulegraph.report.tables import CSV_COLUMNS
+from mulegraph.splits.builder import build_split, rolling_steps
+from mulegraph.types import FeatureMatrix, GraphDataset
+from mulegraph.util import Paths
 
 METRICS = ["f1", "pr_auc", "p_at_r50"]
 SEEDS = [0, 1]
@@ -92,6 +98,8 @@ def test_rolling_regime_writes_one_child_run_per_seed(
     assert rows
     assert {r["regime"] for r in rows} == {"temporal_rolling"}
     assert {r["n_seeds"] for r in rows} == {str(len(SEEDS))}
+    # Rank metrics over stitched rows would pool incomparable score scales (PR-E7).
+    assert {r["metric"] for r in rows} == {"test_f1"}
 
 
 def test_rolling_curve_has_one_row_per_seed_and_test_timestep(
@@ -135,32 +143,36 @@ def test_rolling_test_idx_covers_every_labelled_node_in_the_window(
     assert test_idx == expected
 
 
-def test_rolling_threshold_is_chosen_once_per_step_on_its_own_validation(
-    rolling_config: RunConfig, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """PR-E4: a rolling run calls choose_threshold once per step, each on that step's val only."""
-    from mulegraph.splits.builder import build_split, rolling_steps
-    from mulegraph.util import Paths
-
-    seen: list[int] = []
-    real = pipeline.choose_threshold
-
-    def spy(y_val: np.ndarray, p_val: np.ndarray) -> tuple[float, float]:
-        seen.append(int(np.asarray(y_val).size))
-        return real(y_val, p_val)
-
-    monkeypatch.setattr(pipeline, "choose_threshold", spy)
-    pipeline.run_benchmark(rolling_config, pipeline.SMOKE_CONFIG)
-
+def _base_inputs(cfg: RunConfig) -> tuple[GraphDataset, FeatureMatrix, Path]:
     paths = Paths.from_env()
-    data = pipeline.load_dataset(rolling_config.dataset, paths.data_dir)
-    cache_dir = paths.cache_dir(rolling_config.dataset.name, rolling_config.dataset.version)
-    step_val_sizes = [
-        build_split(data, step, cache_dir).val.size
-        for step in rolling_steps(rolling_config.split.regimes[0])
-    ]
+    data = load_dataset(cfg.dataset, paths.data_dir)
+    cache_dir = paths.cache_dir(cfg.dataset.name, cfg.dataset.version)
+    return data, select_features(data, None, "base"), cache_dir
 
-    assert seen == step_val_sizes * len(rolling_config.seeds)
+
+def test_each_rolling_step_is_decided_at_its_own_validation_threshold(
+    rolling_config: RunConfig,
+) -> None:
+    """PR-E4, PR-E7: a rolling fit is one single-step fit per test batch, stitched in order."""
+    data, feats, cache_dir = _base_inputs(rolling_config)
+    regime = rolling_config.split.regimes[0]
+    steps = [build_split(data, s, cache_dir) for s in rolling_steps(regime)]
+    model_cfg = rolling_config.models[0]
+
+    rolling = pipeline.fit(data, feats, steps, model_cfg, 0, "cpu")
+
+    assert list(rolling.steps) == list(range(9, 13))
+    for step in steps:
+        alone = pipeline.fit(data, feats, [step], model_cfg, 0, "cpu")
+        assert alone.threshold == choose_threshold(alone.val.y, alone.val.proba)[0]
+        t = step.params["test"][0]
+        rows = rolling.test.time == t
+        np.testing.assert_array_equal(rolling.test.idx[rows], alone.test.idx)
+        np.testing.assert_array_equal(rolling.test.proba[rows], alone.test.proba)
+        assert (rolling.test_threshold[rows] == alone.threshold).all()
+        assert rolling.steps[t]["ts_threshold"] == alone.threshold
+    # Drift and score apply one threshold: the last step's.
+    assert rolling.threshold == alone.threshold
 
 
 def test_run_benchmark_writes_the_results_table(tiny_config: RunConfig, tmp_path: Path) -> None:
@@ -200,32 +212,52 @@ def test_run_benchmark_writes_per_timestep_curves_and_figure(
     assert (tmp_path / "report" / "figures" / "pipeline_test_curves.png").stat().st_size > 0
 
 
-def test_threshold_is_never_chosen_on_test_rows(
-    tiny_config: RunConfig, monkeypatch: pytest.MonkeyPatch
+@pytest.mark.parametrize("config", ["tiny_config", "rolling_config"])
+def test_every_logged_test_f1_is_scored_at_its_runs_validation_optimum(
+    config: str, request: pytest.FixtureRequest
 ) -> None:
-    """PR-E4: every threshold call must be the validation set, exactly."""
-    from mulegraph.splits.builder import build_split
-    from mulegraph.util import Paths
+    """PR-E4 end to end: each child run's threshold and test F1 re-derive from its predictions."""
+    import mlflow
+    from sklearn.metrics import f1_score
 
-    seen: list[int] = []
-    real = pipeline.choose_threshold
-
-    def spy(y_val: np.ndarray, p_val: np.ndarray) -> tuple[float, float]:
-        seen.append(int(np.asarray(y_val).size))
-        return real(y_val, p_val)
-
-    monkeypatch.setattr(pipeline, "choose_threshold", spy)
-    pipeline.run_benchmark(tiny_config, pipeline.SMOKE_CONFIG)
-
-    paths = Paths.from_env()
-    data = pipeline.load_dataset(tiny_config.dataset, paths.data_dir)
-    split = build_split(
-        data,
-        tiny_config.split.regimes[0],
-        paths.cache_dir(tiny_config.dataset.name, tiny_config.dataset.version),
+    cfg: RunConfig = request.getfixturevalue(config)
+    pipeline.run_benchmark(cfg, pipeline.SMOKE_CONFIG)
+    mlflow.set_tracking_uri(cfg.mlflow.resolved_uri())
+    client = mlflow.MlflowClient()
+    runs = mlflow.search_runs(
+        experiment_names=[cfg.mlflow.experiment], filter_string="tags.kind = 'child'"
     )
-    assert seen == [split.val.size] * tiny_config.total_fits()
-    assert split.test.size not in seen
+    assert len(runs) == len(cfg.models) * len(cfg.seeds)
+    for run_id in runs["run_id"]:
+        path = mlflow.artifacts.download_artifacts(
+            run_id=run_id, artifact_path="predictions.parquet"
+        )
+        frame = pd.read_parquet(path)
+        val, test = frame[frame["part"] == "val"], frame[frame["part"] == "test"]
+        logged = client.get_run(run_id).data.metrics
+        # On a rolling run the stored val rows and the scalar threshold are the last step's.
+        assert logged["threshold"] == choose_threshold(val["y"], val["proba"])[0]
+        # Each rolling test batch is decided at its own step's threshold, logged at step=t.
+        by_step = {m.step: m.value for m in client.get_metric_history(run_id, "ts_threshold")}
+        thr = test["time"].map(by_step).to_numpy() if by_step else logged["threshold"]
+        assert logged["test_f1"] == pytest.approx(f1_score(test["y"], test["proba"] >= thr))
+
+
+def test_the_threshold_is_the_validation_optimum_applied_to_every_test_row(
+    tiny_config: RunConfig,
+) -> None:
+    """PR-E4: fit() thresholds on its own validation rows; test rows are scored, never searched."""
+    data, feats, cache_dir = _base_inputs(tiny_config)
+    split = build_split(data, tiny_config.split.regimes[0], cache_dir)
+
+    fitted = pipeline.fit(data, feats, [split], tiny_config.models[0], 0, "cpu")
+
+    np.testing.assert_array_equal(fitted.val.idx, split.val)
+    np.testing.assert_array_equal(fitted.test.idx, split.test)
+    assert (fitted.threshold, fitted.val_f1) == choose_threshold(fitted.val.y, fitted.val.proba)
+    assert (fitted.test_threshold == fitted.threshold).all()
+    assert fitted.split_hash == split.split_hash
+    assert fitted.steps == {}
 
 
 def test_every_child_run_carries_its_provenance_and_an_honest_trial_count(

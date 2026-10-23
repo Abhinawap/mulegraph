@@ -138,8 +138,9 @@ flowchart LR
     E --> J[Drift monitor<br/>never sees labels]
 ```
 
-- **The rules that make the numbers trustworthy are enforced by tests.** A spy on the threshold
-  function fails the build if it ever receives test rows. A synthetic multi-timestep graph checks
+- **The rules that make the numbers trustworthy are enforced by tests.** Every logged threshold
+  is re-derived from its run's own validation predictions, so one searched on test rows fails the
+  build. A synthetic multi-timestep graph checks
   that features at time *t* are identical with and without later edges. A test checks that no
   drift detector's signature accepts labels. Asking for accuracy as a metric raises an error.
 - **Config-driven and reproducible.** One Typer CLI with three commands, Pydantic-validated YAML,
