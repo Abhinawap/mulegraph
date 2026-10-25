@@ -7,6 +7,7 @@ import re
 import shutil
 import subprocess
 import sys
+import tokenize
 from pathlib import Path
 from typing import NamedTuple
 
@@ -46,6 +47,20 @@ MUTANTS = [
         "mulegraph/pipeline.py",
         "np.full(test.idx.size, threshold, dtype=np.float64)",
         f"np.full(test.idx.size, {ON_TEST}, dtype=np.float64)",
+        (FIT_THRESHOLD,),
+    ),
+    Mutant(
+        "Fitted.threshold searched on test",
+        "mulegraph/pipeline.py",
+        "threshold=threshold,\n        val_f1=val_f1,",
+        f"threshold={ON_TEST},\n        val_f1=val_f1,",
+        (FIT_THRESHOLD,),
+    ),
+    Mutant(
+        "Fitted.test_threshold searched on test",
+        "mulegraph/pipeline.py",
+        "test_threshold=np.concatenate(thresholds),",
+        f"test_threshold=np.full(sum(t.idx.size for t in tests), {ON_TEST}),",
         (FIT_THRESHOLD,),
     ),
     Mutant(
@@ -101,6 +116,49 @@ MUTANTS = [
     ),
 ]
 
+DRIFT = "drift D1-D3: rows wait for the end-to-end test #51 adds"
+SCORE = "score path: guarded by tests/test_score.py, no row yet"
+UNGUARDED = "score path: no test goes red on a test-searched threshold here yet"
+#: Every threshold-bearing line of pipeline.py that no row plants, with why (stripped line: reason).
+UNPLANTED = {
+    "from mulegraph.eval.threshold import choose_threshold": "import",
+    "threshold: float": "field declaration",
+    "test_threshold: np.ndarray": "field declaration",
+    "tests, thresholds, per_step, seconds = [], [], {}, 0.0": "empty-list initialiser",
+    "threshold=fitted.threshold,": DRIFT,
+    'ref_f1 = float(per_timestep(fitted.val, fitted.threshold)["f1"].mean())': DRIFT,
+    "table = event_windows(fitted.test, fitted.threshold, event)": DRIFT,
+    'meta = {"threshold": fitted.threshold, "val_f1": fitted.val_f1, "commit": commit, '
+    "**definition}": SCORE,
+    'log.info("deployed model %s, validation threshold %.4f", model_path, fitted.threshold)': (
+        "log line"
+    ),
+    'threshold = fit_meta["threshold"]': SCORE,
+    "threshold=threshold,": UNGUARDED,
+    "order = order[scores[order] >= threshold]": UNGUARDED,
+    '{"detector": r.detector, "score": r.score, "flag_at": r.threshold}': (
+        "a detector's flag level, not the decision threshold"
+    ),
+    '"threshold": threshold,': SCORE,
+    "threshold,": "log line",
+}
+
+
+def _threshold_lines(path: Path) -> dict[int, str]:
+    """Line number to stripped text of each code line naming a threshold or logging one."""
+    with path.open("rb") as fh:
+        hits = {
+            tok.start[0]
+            for tok in tokenize.tokenize(fh.readline)
+            if (tok.type == tokenize.NAME and "threshold" in tok.string)
+            or (
+                tok.type == tokenize.STRING
+                and tok.string.strip("\"'") in {"threshold", "ts_threshold"}
+            )
+        }
+    lines = path.read_text().splitlines()
+    return {n: lines[n - 1].strip() for n in hits}
+
 
 def _copy(repo_root: Path, tmp_path: Path) -> Path:
     """The package, its tests and configs, so pytest in the copy imports the copy."""
@@ -151,13 +209,28 @@ def test_a_missing_site_fails_with_site_moved(repo_root: Path, tmp_path: Path) -
         _plant(root, gone)
 
 
+def test_every_threshold_use_is_planted_or_excused(repo_root: Path) -> None:
+    """PR-E4: a new threshold use in pipeline.py fails here until it gets a row or a reason."""
+    path = repo_root / "mulegraph" / "pipeline.py"
+    text = path.read_text()
+    planted = set()
+    for m in MUTANTS:
+        if m.file == "mulegraph/pipeline.py" and m.site in text:
+            start = text[: text.index(m.site)].count("\n") + 1
+            planted.update(range(start, start + m.site.count("\n") + 1))
+    unplanted = [s for n, s in _threshold_lines(path).items() if n not in planted]
+    assert sorted(unplanted) == sorted(UNPLANTED), "each needs a MUTANTS row or an UNPLANTED reason"
+
+
 @pytest.mark.parametrize("mutant", MUTANTS, ids=[m.name for m in MUTANTS])
 def test_planting_the_bug_fails_its_guard(mutant: Mutant, repo_root: Path, tmp_path: Path) -> None:
     root = _copy(repo_root, tmp_path)
     _plant(root, mutant)
-    out = _run_pytest(root, *mutant.tests)
+    out = _run_pytest(root, "--tb=line", *mutant.tests)
     log = out.stdout + out.stderr
     # A NameError or crash would also exit nonzero without proving the guard catches anything.
     for t in mutant.tests:
         pattern = rf"FAILED {re.escape(t)} - (assert|AssertionError)"
         assert re.search(pattern, log), log
+    # ...and so would a bare assert inside the planted package, which --tb=line places there.
+    assert not re.search(rf"^{re.escape(str(root / 'mulegraph'))}\S*:\d+: ", log, re.M), log

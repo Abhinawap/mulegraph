@@ -14,6 +14,7 @@
 - [x] README leads with `mulegraph score` (21 Sep 2026).
 - [x] Static HTML report per scored batch (21 Sep 2026).
 - [ ] Add the drift rows D1–D3 to `tests/test_integrity_mutants.py` once the end-to-end drift test from #51 lands.
+- [ ] Guard the score path's `score_batches(threshold=...)` and alert-queue cut in `tests/test_score.py` (no test goes red on a test-searched threshold there), then plant both as rows.
 - [ ] Hero figure of a laundering subgraph, and a screenshot of the report for the README. Optional polish.
 
 What is done and when is in [changelog.md](changelog.md).

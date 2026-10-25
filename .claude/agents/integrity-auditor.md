@@ -23,8 +23,11 @@ threshold selection is fatal to the result, not a style issue.
 
 List every place the threshold, or a number computed from it, reaches an
 output: an MLflow metric, a CSV, a figure, a detector argument. For each, name
-the test that goes red if that place used a threshold chosen on test rows. A
-place with no red test is a finding, even when the code there is correct today.
+its row in `tests/test_integrity_mutants.py`, which plants a threshold chosen
+on test rows there and requires its guard test to go red. A place with no row
+is a finding, even when the code there is correct today; so is an `UNPLANTED`
+reason that does not hold. Plant candidate rows with that file's `_copy`,
+`_plant` and `_run_pytest` helpers.
 
 **2. PR-F2 — feature causality.** Graph features use only edges with
 `time <= t`. Look for any aggregation, join, merge, groupby, or neighbour
