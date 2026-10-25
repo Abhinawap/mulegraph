@@ -67,4 +67,5 @@ testpaths = ["tests"]
 markers = [
     "elliptic: requires the real Elliptic++ raw CSVs on disk",
     "slow: end-to-end runs measured in tens of seconds",
+    "integrity: plants each guarded bug in a copy of the package and expects its tests to fail",
 ]
