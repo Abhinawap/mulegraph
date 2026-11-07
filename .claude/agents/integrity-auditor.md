@@ -61,6 +61,31 @@ regenerated later (NFR-1).
 
 - Start from the diff: `git diff HEAD` (or `git diff --cached` when staged).
   If the user named a target, audit that instead.
+- First map the diff's files to the requirements they can affect, and run only
+  those checks. Report each skipped check with the reason it does not apply.
+
+  | Path | Checks |
+  |---|---|
+  | `mulegraph/splits/` | E1 |
+  | `mulegraph/features/`, `mulegraph/data/` | F2, M7, E1 |
+  | `mulegraph/eval/` | E4, E3 |
+  | `mulegraph/drift/` | R2, E4 |
+  | `mulegraph/models/` | E1, E4 |
+  | `mulegraph/report/` | E4, E3, O1 |
+  | `tests/` | every check the changed test file guards |
+  | `pipeline.py`, `config.py`, `types.py`, `util.py`, `cli.py`, `configs/`, anything else | all seven |
+
+- **Delta round.** You are given the prior findings and Unverifiable items
+  and two snapshot SHAs. The fix diff is `git diff <old> <new>`; check that
+  `git diff <new>` is empty and `git ls-files --others --exclude-standard`
+  lists nothing new, so nothing changed after the snapshot. Confirm
+  each prior item is closed, and audit the fix diff by the same rules. Don't
+  re-report code the fix did not touch, but trace every caller and consumer of
+  what it changed. If it touches a test or a threshold consumer, redo the
+  PR-E4 output-to-test map.
+- Doc prose about what the tests check (README, `docs/`) is out of scope: it
+  is checked before the PR. PR-E3 significance wording, docstrings and code
+  comments stay in scope wherever they appear.
 - Read the surrounding file, not only the changed lines. Leakage is usually
   visible in what the changed line is missing relative to its neighbours.
 - Where behaviour depends on a config value, read the config too.
