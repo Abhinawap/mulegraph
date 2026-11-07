@@ -108,7 +108,8 @@ uv run mulegraph smoke                     # ~15 s, synthetic graph, benchmark +
 
 # Quality
 uv run ruff check . && uv run ruff format .
-uv run pytest --cov=mulegraph
+uv run pytest -m "not integrity" --cov=mulegraph
+uv run pytest -m integrity -n auto           # planted-bug rows, ~3 min on 6 workers
 uv run python scripts/dump_outputs.py before/   # refactor check: dump on the branch too, diff -r
 
 # Tracking
@@ -117,7 +118,7 @@ uv run mlflow ui --backend-store-uri sqlite:///mlruns/mlflow.db
 
 ## Testing
 
-CI (GitHub Actions) runs ruff, pytest with coverage, and `mulegraph smoke` on every push. The full grid NEVER runs in CI.
+CI (GitHub Actions) runs ruff, pytest with coverage, and `mulegraph smoke` on every push, and the planted-bug rows (`-m integrity`) in their own job. The full grid NEVER runs in CI.
 
 Required unit tests (NFR-2):
 - Loaders — shapes, dtypes, label counts, `meta.cross_time_edges` set correctly

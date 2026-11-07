@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import csv
 from pathlib import Path
+from unittest import mock
 
 import numpy as np
 import pandas as pd
@@ -86,6 +87,20 @@ def rolling_config(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> RunConfig
             "device": "cpu",
         }
     )
+
+
+@pytest.fixture
+def multi_config(tiny_config: RunConfig) -> RunConfig:
+    """tiny_config under all three regimes at once, as the Elliptic configs mix them."""
+    raw = tiny_config.model_dump()
+    temporal = raw["split"]["regimes"][0]
+    raw["split"]["regimes"] = [
+        {"regime": "random"},
+        temporal,
+        {**temporal, "regime": "temporal_rolling"},
+    ]
+    raw["mlflow"]["experiment"] = "pipeline_multi_test"
+    return RunConfig.model_validate(raw)
 
 
 def test_rolling_regime_writes_one_child_run_per_seed(
@@ -212,23 +227,27 @@ def test_run_benchmark_writes_per_timestep_curves_and_figure(
     assert (tmp_path / "report" / "figures" / "pipeline_test_curves.png").stat().st_size > 0
 
 
-@pytest.mark.parametrize("config", ["tiny_config", "rolling_config"])
+@pytest.mark.parametrize("config", ["tiny_config", "rolling_config", "multi_config"])
 def test_every_logged_f1_is_scored_at_its_runs_validation_optimum(
     config: str, request: pytest.FixtureRequest
 ) -> None:
     """PR-E4 end to end: each child run's threshold and every F1 it logs re-derive from its rows."""
     import mlflow
-    from sklearn.metrics import f1_score
+    from sklearn.metrics import f1_score, precision_score, recall_score
 
     cfg: RunConfig = request.getfixturevalue(config)
-    pipeline.run_benchmark(cfg, pipeline.SMOKE_CONFIG)
+    with mock.patch.object(pipeline, "plot_curves", wraps=pipeline.plot_curves) as draw:
+        pipeline.run_benchmark(cfg.model_copy(deep=True), pipeline.SMOKE_CONFIG)
     mlflow.set_tracking_uri(cfg.mlflow.resolved_uri())
     client = mlflow.MlflowClient()
     runs = mlflow.search_runs(
         experiment_names=[cfg.mlflow.experiment], filter_string="tags.kind = 'child'"
     )
-    assert len(runs) == len(cfg.models) * len(cfg.seeds)
+    assert len(runs) == len(cfg.models) * len(cfg.seeds) * len(cfg.split.regimes)
     curves = pd.read_csv(Paths.from_env().tables_dir() / f"{cfg.mlflow.experiment}_curves.csv")
+    assert draw.call_count == 1
+    data, _, cache_dir = _base_inputs(cfg)
+    regimes = {r.regime: r for r in cfg.split.regimes}
     for run_id in runs["run_id"]:
         path = mlflow.artifacts.download_artifacts(
             run_id=run_id, artifact_path="predictions.parquet"
@@ -237,14 +256,27 @@ def test_every_logged_f1_is_scored_at_its_runs_validation_optimum(
         val, test = frame[frame["part"] == "val"], frame[frame["part"] == "test"]
         run = client.get_run(run_id)
         logged, tags = run.data.metrics, run.data.tags
-        # On a rolling run the stored val rows and the scalar threshold are the last step's.
-        assert logged["threshold"] == choose_threshold(val["y"], val["proba"])[0]
+        regime = regimes[tags["regime"]]
+        if regime.regime == "random":
+            # No window to check: the stored rows are the partition's own, and disjoint.
+            split = build_split(data, regime, cache_dir)
+            assert not set(val["idx"]) & set(test["idx"])
+            np.testing.assert_array_equal(val["idx"], split.val)
+            np.testing.assert_array_equal(test["idx"], split.test)
+        else:
+            # On a rolling run the stored val rows and the scalar threshold are the last step's.
+            last = rolling_steps(regime)[-1] if regime.regime == "temporal_rolling" else regime
+            assert val["time"].between(*last.val).all()
+            assert test["time"].between(*regime.test).all()
+        assert (logged["threshold"], logged["val_f1"]) == choose_threshold(val["y"], val["proba"])
         # Each rolling test batch is decided at its own step's threshold, logged at step=t.
         by_step = {m.step: m.value for m in client.get_metric_history(run_id, "ts_threshold")}
         thr = test["time"].map(by_step).to_numpy() if by_step else logged["threshold"]
         y, time = test["y"].to_numpy(), test["time"].to_numpy()
         hits = test["proba"].to_numpy() >= thr
         assert logged["test_f1"] == pytest.approx(f1_score(y, hits))
+        assert logged["diag_precision"] == pytest.approx(precision_score(y, hits))
+        assert logged["diag_recall"] == pytest.approx(recall_score(y, hits))
         # The per-timestep curve, which drift's lead time reads, is scored at it too (PR-E5).
         per_batch = {
             int(t): f1_score(y[time == t], hits[time == t], zero_division=0.0)
@@ -252,19 +284,21 @@ def test_every_logged_f1_is_scored_at_its_runs_validation_optimum(
         }
         ts_f1 = {m.step: m.value for m in client.get_metric_history(run_id, "ts_f1")}
         assert ts_f1 == pytest.approx(per_batch)
-        # So is the curves table the figure is drawn from (PR-E5).
-        mine = curves[
-            (curves["model"] == tags["model"])
-            & (curves["features"] == tags["features"])
-            & (curves["seed"] == int(run.data.params["seed"]))
-        ]
-        assert dict(zip(mine["time"], mine["f1"], strict=True)) == pytest.approx(per_batch)
+        # So are the curves table and the curves the figure draws (PR-E5).
+        for table in (curves, draw.call_args.args[0]):
+            mine = table[
+                (table["regime"] == tags["regime"])
+                & (table["model"] == tags["model"])
+                & (table["features"] == tags["features"])
+                & (table["seed"] == int(run.data.params["seed"]))
+            ]
+            assert dict(zip(mine["time"], mine["f1"], strict=True)) == pytest.approx(per_batch)
 
 
 def test_every_logged_rolling_step_threshold_is_its_own_validation_optimum(
     rolling_config: RunConfig,
 ) -> None:
-    """PR-E4, PR-E7 end to end: each logged ts_threshold is its step's own validation optimum."""
+    """PR-E4, PR-E7 end to end: each logged ts_threshold and ts_val_f1 is its step's own."""
     import mlflow
 
     pipeline.run_benchmark(rolling_config, pipeline.SMOKE_CONFIG)
@@ -279,13 +313,15 @@ def test_every_logged_rolling_step_threshold_is_its_own_validation_optimum(
     assert len(runs) == len(rolling_config.seeds)
     for run_id, seed in zip(runs["run_id"], runs["params.seed"], strict=True):
         # Only the last step's validation rows are stored, so each step is refitted alone.
-        expected = {}
+        expected: dict[str, dict[int, float]] = {"ts_threshold": {}, "ts_val_f1": {}}
         for step in steps:
             alone = pipeline.fit(data, feats, [step], rolling_config.models[0], int(seed), "cpu")
-            assert alone.threshold == choose_threshold(alone.val.y, alone.val.proba)[0]
-            expected[step.params["test"][0]] = alone.threshold
-        history = client.get_metric_history(run_id, "ts_threshold")
-        assert {m.step: m.value for m in history} == expected
+            assert (alone.threshold, alone.val_f1) == choose_threshold(alone.val.y, alone.val.proba)
+            t = step.params["test"][0]
+            expected["ts_threshold"][t], expected["ts_val_f1"][t] = alone.threshold, alone.val_f1
+        for name, by_step in expected.items():
+            history = client.get_metric_history(run_id, name)
+            assert {m.step: m.value for m in history} == by_step, name
 
 
 def test_the_threshold_is_the_validation_optimum_applied_to_every_test_row(

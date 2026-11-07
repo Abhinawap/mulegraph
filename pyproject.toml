@@ -38,6 +38,7 @@ mulegraph = "mulegraph.cli:app"
 dev = [
     "pytest==9.0.1",
     "pytest-cov==7.0.0",
+    "pytest-xdist==3.8.0",
     "ruff==0.14.5",
 ]
 
@@ -67,4 +68,5 @@ testpaths = ["tests"]
 markers = [
     "elliptic: requires the real Elliptic++ raw CSVs on disk",
     "slow: end-to-end runs measured in tens of seconds",
+    "integrity: plants each guarded bug in a copy of the package and expects its tests to fail",
 ]

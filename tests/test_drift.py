@@ -5,6 +5,7 @@ from __future__ import annotations
 import csv
 import inspect
 from pathlib import Path
+from unittest import mock
 
 import numpy as np
 import pandas as pd
@@ -12,8 +13,13 @@ import pytest
 
 from mulegraph import pipeline
 from mulegraph.config import DriftRunConfig
+from mulegraph.data import load_dataset
 from mulegraph.drift.detectors import alert_shift, conf_shift, ks_frac, psi
 from mulegraph.drift.monitor import lead_time, score_batches
+from mulegraph.eval.threshold import choose_threshold
+from mulegraph.features.builder import build_features
+from mulegraph.features.select import select_features
+from mulegraph.util import Paths
 
 #: DriftConfig's defaults, spelled out: drift/ never imports the config (coupling rule).
 FLAGS = dict(
@@ -196,6 +202,157 @@ def test_run_drift_with_an_event_writes_before_and_after_rows(
     assert table["probe_roc_auc"].between(0, 1).all()
     # The probe depends on the window and features only, not the seed of the fitted model.
     assert table.groupby("window")["probe_roc_auc"].nunique().eq(1).all()
+
+
+def _drift_outputs(
+    val: pd.DataFrame,
+    test: pd.DataFrame,
+    thr: float,
+    event: int,
+    detector_call: mock._Call,
+    cfg: DriftRunConfig,
+) -> dict:
+    """What a drift run derives from its threshold, recomputed from its scored rows (PR-E4)."""
+    from sklearn.metrics import f1_score, precision_score, recall_score
+
+    def f1(rows: pd.DataFrame) -> float:
+        return f1_score(rows["y"], rows["proba"] >= thr, zero_division=0.0)
+
+    curve = pd.DataFrame([(int(t), f1(g)) for t, g in test.groupby("time")], columns=["time", "f1"])
+    ref_f1 = np.mean([f1(g) for _, g in val.groupby("time")])
+    # The detector inputs run_drift passed, checked against the run by the caller.
+    scores = score_batches(*detector_call.args, **{**detector_call.kwargs, "threshold": thr})
+    sides = {"before": test[test["time"] < event], "after": test[test["time"] >= event]}
+    hits = test["proba"] >= thr
+    return {
+        "ref_f1": ref_f1,
+        "test_f1": f1(test),
+        "ts_f1": dict(zip(curve["time"], curve["f1"], strict=True)),
+        "diag_precision": precision_score(test["y"], hits, zero_division=0.0),
+        "diag_recall": recall_score(test["y"], hits),
+        "recall": {w: recall_score(r["y"], r["proba"] >= thr) for w, r in sides.items()},
+        "scores": scores,
+        "lead": lead_time(curve, scores, ref_f1, cfg.drift.f1_drop, cfg.drift.drop_run),
+    }
+
+
+def test_every_drift_use_of_the_threshold_is_its_runs_validation_optimum(
+    drift_config: DriftRunConfig, tmp_path: Path
+) -> None:
+    """PR-E4 end to end: every drift output that depends on the threshold uses the val optimum."""
+    import mlflow
+
+    event = 11
+    raw = drift_config.model_dump()
+    # Calibrated, as configs/elliptic_drift.yaml is: the alert flag level then depends on
+    # the threshold too.
+    raw["drift"] |= {"event": event, "calibrate": True}
+    # On graph seed 9 test units score between the val and the test optimum, and test F1
+    # falls below the drop level, so every output can move; the guard in the loop fails if
+    # that stops being true.
+    raw["dataset"]["synthetic"]["seed"] = 9
+    cfg = DriftRunConfig.model_validate(raw)
+    with (
+        mock.patch.object(pipeline, "score_batches", wraps=pipeline.score_batches) as detect,
+        mock.patch.object(pipeline, "plot_drift", wraps=pipeline.plot_drift) as draw,
+    ):
+        # A copy: the expected outputs read cfg, which the run must not be able to rewrite.
+        pipeline.run_drift(cfg.model_copy(deep=True), pipeline.SMOKE_CONFIG)
+
+    tables = tmp_path / "report" / "tables"
+    run_key = ["model", "features", "seed"]
+    scores, leads, events = (
+        pd.read_csv(tables / f"drift_test_{name}.csv").groupby(run_key)
+        for name in ("scores", "lead_time", "event")
+    )
+    mlflow.set_tracking_uri(cfg.mlflow.resolved_uri())
+    client = mlflow.MlflowClient()
+    runs = mlflow.search_runs(
+        experiment_names=[cfg.mlflow.experiment], filter_string="tags.kind = 'child'"
+    )
+    assert len(runs) == len(cfg.models) * len(cfg.seeds)
+    # run_drift fits and scores in config order, then draws once.
+    order = [(m.name, m.features, s) for m in cfg.models for s in cfg.seeds]
+    assert detect.call_count == len(order) and draw.call_count == 1
+    drawn_curves, drawn_leads = (frame.groupby(run_key) for frame in draw.call_args.args[:2])
+    # What every detector call should receive, built without run_drift (PR-R2).
+    paths = Paths.from_env()
+    data = load_dataset(cfg.dataset, paths.data_dir)
+    gfp = build_features(data, cfg.features, paths.cache_dir(cfg.dataset.name, cfg.dataset.version))
+    regime = cfg.split.regimes[0]
+    window = (data.batch_id >= regime.val[0]) & (data.batch_id <= regime.test[1])
+    scored_idx = np.flatnonzero(window)
+    d = cfg.drift
+    flags = {
+        "detectors": d.detectors,
+        "bins": d.bins,
+        "psi_flag": d.psi_flag,
+        "ks_alpha": d.ks_alpha,
+        "ks_frac_flag": d.ks_frac,
+        "conf_flag": d.conf_flag,
+        "alert_flag": d.alert_flag,
+        "calibrate": d.calibrate,
+    }
+    for run_id in runs["run_id"]:
+        path = mlflow.artifacts.download_artifacts(
+            run_id=run_id, artifact_path="predictions.parquet"
+        )
+        frame = pd.read_parquet(path)
+        val, test = frame[frame["part"] == "val"], frame[frame["part"] == "test"]
+        # The rows everything is re-derived from are their configured windows' and no other.
+        assert val["time"].between(*regime.val).all() and test["time"].between(*regime.test).all()
+        run = client.get_run(run_id)
+        key = (run.data.tags["model"], run.data.tags["features"], int(run.data.params["seed"]))
+        # The detectors got this run's features (no label column), batches, reference window,
+        # configured flags and model scores. Only labelled scores are stored, so only those are
+        # pinned; a shift of every score, as toward a test-searched cut, moves them too.
+        call = detect.call_args_list[order.index(key)]
+        values, proba, batch, ref = call.args
+        np.testing.assert_array_equal(values, select_features(data, gfp, key[1]).values[window])
+        np.testing.assert_array_equal(batch, data.batch_id[window])
+        np.testing.assert_array_equal(ref, np.arange(regime.val[0], regime.val[1] + 1))
+        stored = frame.set_index("idx")["proba"]
+        labelled = np.isin(scored_idx, stored.index)
+        np.testing.assert_array_equal(proba[labelled], stored.loc[scored_idx[labelled]])
+        assert {k: v for k, v in call.kwargs.items() if k != "threshold"} == flags
+
+        thr, val_f1 = choose_threshold(val["y"], val["proba"])
+        want = _drift_outputs(val, test, thr, event, call, cfg)
+        # Each check below can fail: a threshold searched on test moves every output...
+        bad = choose_threshold(test["y"], test["proba"])[0]
+        planted = _drift_outputs(val, test, bad, event, call, cfg)
+        for name, value in want.items():
+            if isinstance(value, pd.DataFrame):
+                assert not value.equals(planted[name]), name
+            else:
+                assert planted[name] != pytest.approx(value), name
+        # ...including when F1 first drops and the lead of a detector that holds a flag:
+        # measured here, not NaN at both thresholds.
+        for column in ("first_drop", "lead"):
+            got, moved = want["lead"][column], planted["lead"][column]
+            assert got.notna().any() and not got.equals(moved), column
+
+        assert (run.data.metrics["threshold"], run.data.metrics["val_f1"]) == (thr, val_f1)
+        # Every detector score, flag and flag level; only the alert rate's depend on it (PR-R1).
+        written = scores.get_group(key)[want["scores"].columns].reset_index(drop=True)
+        pd.testing.assert_frame_equal(written, want["scores"], check_dtype=False)
+        # Lead time: its drop level comes from ref_f1, its drop from the F1 curve (PR-R4).
+        assert leads.get_group(key)["ref_f1"].to_numpy() == pytest.approx(want["ref_f1"])
+        drawn = drawn_curves.get_group(key)
+        assert dict(zip(drawn["time"], drawn["f1"], strict=True)) == pytest.approx(want["ts_f1"])
+        # The lead table from those checked inputs and the configured drop rule, as written
+        # and as drawn.
+        for table in (leads.get_group(key), drawn_leads.get_group(key)):
+            written = table[want["lead"].columns].reset_index(drop=True)
+            pd.testing.assert_frame_equal(written, want["lead"], check_dtype=False)
+        # What the drift child run logs, as a benchmark run's (PR-E5).
+        for name in ("test_f1", "diag_precision", "diag_recall"):
+            assert run.data.metrics[name] == pytest.approx(want[name]), name
+        ts_f1 = {m.step: m.value for m in client.get_metric_history(run_id, "ts_f1")}
+        assert ts_f1 == pytest.approx(want["ts_f1"])
+        # The event table's recall on each side of the event (PR-R5).
+        recall = events.get_group(key).set_index("window")["recall"].to_dict()
+        assert recall == pytest.approx(want["recall"])
 
 
 def test_run_drift_writes_scores_and_lead_time(
