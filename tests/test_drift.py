@@ -256,8 +256,9 @@ def test_every_drift_use_of_the_threshold_is_its_runs_validation_optimum(
         mock.patch.object(pipeline, "score_batches", wraps=pipeline.score_batches) as detect,
         mock.patch.object(pipeline, "plot_drift", wraps=pipeline.plot_drift) as draw,
     ):
-        # A copy: the expected outputs read cfg, which the run must not be able to rewrite.
-        pipeline.run_drift(cfg.model_copy(deep=True), pipeline.SMOKE_CONFIG)
+        pinned = cfg.model_dump()  # frozen stops assignment, not in-place edits
+        pipeline.run_drift(cfg, pipeline.SMOKE_CONFIG)
+        assert cfg.model_dump() == pinned, "the run rewrote its config"
 
     tables = tmp_path / "report" / "tables"
     run_key = ["model", "features", "seed"]
