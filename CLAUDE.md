@@ -86,7 +86,7 @@ All code is written under the **ponytail** skill (`/ponytail`, full level). Befo
 
 - ALWAYS branch before major changes: `feature/description` or `fix/description`. NEVER commit directly to `main`.
 - Run `ruff check .` and `pytest` before pushing. NEVER force push to `main`.
-- Changes to splits, features, evaluation, thresholding, drift or model fitting: commit and open the PR only after the `integrity-auditor` agent returns PASS on the final diff; re-audit after every fix.
+- Changes to splits, features, evaluation, thresholding, drift or model fitting: commit and open the PR only after the `integrity-auditor` agent returns PASS on the final diff. Before each round, snapshot the tree with `git add -A && git stash create`. The first audit is a full round; after each fix, run a delta round with a fresh auditor (never a resumed one) given the prior findings and Unverifiable items and the previous and current snapshot SHAs. Before opening the PR, the session opening it checks that every claim in README and `docs/` about what a test asserts matches the test; a mismatch blocks the PR. `/code-review` is not part of this gate; `/ponytail-review` covers standards.
 - Commit messages describe the change and, where relevant, the requirement ID it satisfies (e.g. `PR-F2`).
 - Keep commits focused on single changes.
 
@@ -108,7 +108,9 @@ uv run mulegraph smoke                     # ~15 s, synthetic graph, benchmark +
 
 # Quality
 uv run ruff check . && uv run ruff format .
-uv run pytest --cov=mulegraph
+uv run pytest -m "not integrity" --cov=mulegraph
+uv run pytest -m integrity -n auto           # planted-bug rows, ~3 min on 6 workers
+uv run python scripts/dump_outputs.py before/   # refactor check: dump on the branch too, diff -r
 
 # Tracking
 uv run mlflow ui --backend-store-uri sqlite:///mlruns/mlflow.db
@@ -116,7 +118,7 @@ uv run mlflow ui --backend-store-uri sqlite:///mlruns/mlflow.db
 
 ## Testing
 
-CI (GitHub Actions) runs ruff, pytest with coverage, and `mulegraph smoke` on every push. The full grid NEVER runs in CI.
+CI (GitHub Actions) runs ruff, pytest with coverage, and `mulegraph smoke` on every push, and the planted-bug rows (`-m integrity`) in their own job. The full grid NEVER runs in CI.
 
 Required unit tests (NFR-2):
 - Loaders — shapes, dtypes, label counts, `meta.cross_time_edges` set correctly
