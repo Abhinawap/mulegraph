@@ -38,6 +38,7 @@ mulegraph = "mulegraph.cli:app"
 dev = [
     "pytest==9.0.1",
     "pytest-cov==7.0.0",
+    "pytest-xdist==3.8.0",
     "ruff==0.14.5",
 ]
 

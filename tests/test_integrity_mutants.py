@@ -21,8 +21,32 @@ LOGGED_F1 = PIPELINE + "test_every_logged_f1_is_scored_at_its_runs_validation_op
 ROLLING_FIT = PIPELINE + "test_each_rolling_step_is_decided_at_its_own_validation_threshold"
 ROLLING_LOGGED = PIPELINE + "test_every_logged_rolling_step_threshold_is_its_own_validation_optimum"
 ROLLING_TABLE = PIPELINE + "test_rolling_regime_writes_one_child_run_per_seed"
+MIXED_REGIMES = LOGGED_F1.replace("[tiny_config]", "[multi_config]")
+DRIFT_E2E = (
+    "tests/test_drift.py::test_every_drift_use_of_the_threshold_is_its_runs_validation_optimum"
+)
 #: The threshold searched on the test rows in scope, which no guarded site may use.
 ON_TEST = "choose_threshold(test.y, test.proba)[0]"
+#: The same, where the test rows in scope are a Fitted's.
+ON_FITTED_TEST = "choose_threshold(fitted.test.y, fitted.test.proba)[0]"
+LEAD_SITE = "lead = lead_time(curve, table, ref_f1, cfg.drift.f1_drop, cfg.drift.drop_run)"
+SCORE_ARGS = """feats.values[scored_idx], proba, batch, ref_batches, detectors=cfg.drift.detectors,
+                    bins=cfg.drift.bins, psi_flag=cfg.drift.psi_flag, ks_alpha=cfg.drift.ks_alpha,
+                    ks_frac_flag=cfg.drift.ks_frac, conf_flag=cfg.drift.conf_flag,
+                    alert_flag=cfg.drift.alert_flag, calibrate=cfg.drift.calibrate"""
+#: F1 of ``p >= thr`` as ``choose_threshold`` computes it: sklearn's f1_score can differ by an
+#: ulp, which would turn a val_f1 row red with nothing planted.
+_SK = '__import__("sklearn.metrics").metrics'
+F1_AT = (
+    "(lambda _p, _r: 2.0 * _p * _r / (_p + _r))(*(f({y}, {p} >= {thr})"
+    f" for f in ({_SK}.precision_score, {_SK}.recall_score)))"
+)
+DIAG_AT_TEST = (
+    f"_d = compute_metrics(test.y, test.proba, {ON_TEST}, ['f1'])\n"
+    "    diagnostics['diag_precision'], diagnostics['diag_recall'] ="
+    " _d['precision'], _d['recall']\n"
+    "    curve = per_timestep(test, fitted.test_threshold)"
+)
 
 
 class Mutant(NamedTuple):
@@ -31,6 +55,8 @@ class Mutant(NamedTuple):
     site: str
     broken: str
     tests: tuple[str, ...]
+    #: Further (site, broken) edits the plant needs; only ``site`` counts as the planted use.
+    also: tuple[tuple[str, str], ...] = ()
 
 
 MUTANTS = [
@@ -95,8 +121,8 @@ MUTANTS = [
         "curves table at a test-searched threshold",
         "mulegraph/pipeline.py",
         "curves.append(\n                        curve.assign(",
-        "curves.append(\n                        per_timestep(fitted.test, choose_threshold("
-        "fitted.test.y, fitted.test.proba)[0]).assign(",
+        "curves.append(\n                        "
+        f"per_timestep(fitted.test, {ON_FITTED_TEST}).assign(",
         (LOGGED_F1,),
     ),
     Mutant(
@@ -114,9 +140,270 @@ MUTANTS = [
         "metrics = cfg.eval.metrics if fitted.steps else",
         (ROLLING_TABLE,),
     ),
+    Mutant(
+        "logged diag_* at a test-searched threshold (benchmark)",
+        "mulegraph/pipeline.py",
+        "curve = per_timestep(test, fitted.test_threshold)",
+        DIAG_AT_TEST,
+        (LOGGED_F1,),
+    ),
+    Mutant(
+        "test rows unioned into validation under random only",
+        "mulegraph/pipeline.py",
+        "val = _predict(model, data, feats, step.val)",
+        "val = _predict(model, data, feats, np.union1d(step.val, step.test)"
+        " if step.regime == 'random' else step.val)",
+        (MIXED_REGIMES,),
+    ),
+    Mutant(
+        "rolling ts_val_f1 at a test-searched threshold",
+        "mulegraph/pipeline.py",
+        '"ts_val_f1": val_f1,',
+        '"ts_val_f1": ' + F1_AT.format(y="val.y", p="val.proba", thr=ON_TEST) + ",",
+        (ROLLING_LOGGED,),
+    ),
+    Mutant(
+        "plot_curves draws test-searched curves",
+        "mulegraph/pipeline.py",
+        "plot_curves(curve_table,",
+        "plot_curves(pd.concat(bad_curves, ignore_index=True),",
+        (LOGGED_F1,),
+        also=(
+            (
+                "    curves: list[pd.DataFrame] = []\n",
+                "    curves: list[pd.DataFrame] = []\n    bad_curves = []\n",
+            ),
+            (
+                "                    done += regime_cfg.fits\n",
+                "                    done += regime_cfg.fits\n"
+                f"                    bad_curves.append(per_timestep(fitted.test, {ON_FITTED_TEST})"
+                ".assign(regime=regime_cfg.regime, model=model_cfg.name,"
+                " features=model_cfg.features, seed=seed))\n",
+            ),
+        ),
+    ),
+    # Drift: every row fails the one end-to-end drift test (#51, #56).
+    Mutant(
+        "alert-rate detector at a test-searched threshold",
+        "mulegraph/pipeline.py",
+        "threshold=fitted.threshold,\n                    calibrate",
+        f"threshold={ON_FITTED_TEST},\n                    calibrate",
+        (DRIFT_E2E,),
+    ),
+    Mutant(
+        "drift ref_f1 at a test-searched threshold",
+        "mulegraph/pipeline.py",
+        "per_timestep(fitted.val, fitted.threshold)",
+        f"per_timestep(fitted.val, {ON_FITTED_TEST})",
+        (DRIFT_E2E,),
+    ),
+    Mutant(
+        "event table at a test-searched threshold",
+        "mulegraph/pipeline.py",
+        "event_windows(fitted.test, fitted.threshold, event)",
+        f"event_windows(fitted.test, {ON_FITTED_TEST}, event)",
+        (DRIFT_E2E,),
+    ),
+    Mutant(
+        "lead_time reads a test-searched curve",
+        "mulegraph/pipeline.py",
+        LEAD_SITE,
+        LEAD_SITE.replace(
+            "lead_time(curve,", f"lead_time(per_timestep(fitted.test, {ON_FITTED_TEST}),"
+        ),
+        (DRIFT_E2E,),
+    ),
+    Mutant(
+        "lead_time reads a test-searched ref_f1",
+        "mulegraph/pipeline.py",
+        LEAD_SITE,
+        LEAD_SITE.replace(
+            "table, ref_f1,",
+            f"table, float(per_timestep(fitted.val, {ON_FITTED_TEST})['f1'].mean()),",
+        ),
+        (DRIFT_E2E,),
+    ),
+    Mutant(
+        "drift child run logged at a test-searched threshold",
+        "mulegraph/pipeline.py",
+        "cfg, data, feats, split.regime, model_cfg, seed, device, commit, fitted\n"
+        "                )",
+        "cfg, data, feats, split.regime, model_cfg, seed, device, commit, replace(fitted,"
+        f" test_threshold=np.full_like(fitted.test_threshold, {ON_FITTED_TEST}))\n"
+        "                )\n"
+        "                curve = per_timestep(fitted.test, fitted.threshold)",
+        (DRIFT_E2E,),
+    ),
+    Mutant(
+        "plot_drift draws test-searched curves",
+        "mulegraph/pipeline.py",
+        "curves.append(curve.assign(**tag))",
+        f"curves.append(per_timestep(fitted.test, {ON_FITTED_TEST}).assign(**tag))",
+        (DRIFT_E2E,),
+    ),
+    Mutant(
+        "drift validation rows include a test batch",
+        "mulegraph/pipeline.py",
+        "split = build_split(data, regime_cfg, cache_dir)\n",
+        "split = build_split(data, regime_cfg, cache_dir)\n"
+        "    split = replace(split, val=np.union1d(split.val,"
+        " split.test[data.batch_id[split.test] == regime_cfg.test[0]]))\n",
+        (DRIFT_E2E,),
+    ),
+    Mutant(
+        "post-hoc drop_level from a test-searched ref_f1",
+        "mulegraph/pipeline.py",
+        LEAD_SITE,
+        LEAD_SITE + "\n                lead['drop_level'] = (1 - cfg.drift.f1_drop)"
+        f" * float(per_timestep(fitted.val, {ON_FITTED_TEST})['f1'].mean())",
+        (DRIFT_E2E,),
+    ),
+    Mutant(
+        "drift val_f1 at a test-searched threshold",
+        "mulegraph/pipeline.py",
+        "fitted = fit(data, feats, [split], model_cfg, seed, device)\n",
+        "fitted = fit(data, feats, [split], model_cfg, seed, device)\n"
+        "                fitted = replace(fitted, val_f1="
+        + F1_AT.format(y="fitted.val.y", p="fitted.val.proba", thr=ON_FITTED_TEST)
+        + ")\n",
+        (DRIFT_E2E,),
+    ),
+    Mutant(
+        "alert rows rewritten at a test-searched threshold",
+        "mulegraph/pipeline.py",
+        LEAD_SITE,
+        "from mulegraph.drift.monitor import score_batches as _sb\n"
+        f"                _alt = _sb({SCORE_ARGS}, threshold={ON_FITTED_TEST})\n"
+        '                _a = table["detector"] == "alert"\n'
+        '                table.loc[_a, ["score", "flagged", "threshold"]] = '
+        '_alt.loc[_a, ["score", "flagged", "threshold"]]\n'
+        f"                {LEAD_SITE}",
+        (DRIFT_E2E,),
+    ),
+    Mutant(
+        "test-derived F1 drop rule",
+        "mulegraph/pipeline.py",
+        LEAD_SITE,
+        LEAD_SITE.replace(
+            "cfg.drift.f1_drop,",
+            f"1 - (1 - cfg.drift.f1_drop) * {ON_FITTED_TEST} / fitted.threshold,",
+        ),
+        (DRIFT_E2E,),
+    ),
+    Mutant(
+        "first_drop and lead overwritten at a test-searched threshold",
+        "mulegraph/pipeline.py",
+        LEAD_SITE,
+        f"{LEAD_SITE}\n"
+        f"                _l = lead_time(per_timestep(fitted.test, {ON_FITTED_TEST}),"
+        " table, ref_f1, cfg.drift.f1_drop, cfg.drift.drop_run)\n"
+        '                lead[["first_drop", "lead"]] = _l[["first_drop", "lead"]]',
+        (DRIFT_E2E,),
+    ),
+    Mutant(
+        "alert flag level derived from test F1 (PR-R2)",
+        "mulegraph/pipeline.py",
+        "alert_flag=cfg.drift.alert_flag,",
+        'alert_flag=float(curve["f1"].min()) / 100,',
+        (DRIFT_E2E,),
+    ),
+    Mutant(
+        "label column in the detector features (PR-R2)",
+        "mulegraph/pipeline.py",
+        "feats.values[scored_idx],\n                    proba,",
+        "np.column_stack([feats.values[scored_idx], data.y[scored_idx]]),\n"
+        "                    proba,",
+        (DRIFT_E2E,),
+    ),
+    Mutant(
+        "scores shifted so the alert rate cuts at a test-searched threshold",
+        "mulegraph/pipeline.py",
+        "proba = fitted.model.predict_proba(data, feats, scored_idx)\n",
+        "proba = fitted.model.predict_proba(data, feats, scored_idx)\n"
+        f"                proba = proba - {ON_FITTED_TEST} + fitted.threshold\n",
+        (DRIFT_E2E,),
+    ),
+    Mutant(
+        "logged diag_* at a test-searched threshold (drift)",
+        "mulegraph/pipeline.py",
+        "curve = per_timestep(test, fitted.test_threshold)",
+        DIAG_AT_TEST,
+        (DRIFT_E2E,),
+    ),
+    # If cfg is ever frozen, these plants raise instead of asserting, which the row check
+    # rejects: re-plant them as some other rewrite of the drift settings, don't drop them.
+    Mutant(
+        "run rewrites cfg.drift.f1_drop from test F1",
+        "mulegraph/pipeline.py",
+        'ref_f1 = float(per_timestep(fitted.val, fitted.threshold)["f1"].mean())\n',
+        'ref_f1 = float(per_timestep(fitted.val, fitted.threshold)["f1"].mean())\n'
+        '                cfg.drift.f1_drop = float(1 - curve["f1"].median())\n',
+        (DRIFT_E2E,),
+    ),
+    Mutant(
+        "run rewrites cfg.drift flags from test F1",
+        "mulegraph/pipeline.py",
+        "proba = fitted.model.predict_proba(data, feats, scored_idx)\n",
+        "proba = fitted.model.predict_proba(data, feats, scored_idx)\n"
+        "                cfg.drift.calibrate = False\n"
+        '                cfg.drift.alert_flag = float(curve["f1"].min()) / 100\n',
+        (DRIFT_E2E,),
+    ),
+    # From the integrity audit of #53.
+    Mutant(
+        "benchmark val_f1 at a test-searched threshold",
+        "mulegraph/pipeline.py",
+        '"val_f1": fitted.val_f1,\n                "fit_seconds"',
+        '"val_f1": '
+        + F1_AT.format(y="fitted.val.y", p="fitted.val.proba", thr=ON_TEST)
+        + ',\n                "fit_seconds"',
+        (LOGGED_F1,),
+    ),
+    Mutant(
+        "plot_drift draws a test-searched lead table",
+        "mulegraph/pipeline.py",
+        "            lead_table,\n            paths.figures_dir()",
+        "            pd.concat(bad_leads, ignore_index=True),\n            paths.figures_dir()",
+        (DRIFT_E2E,),
+        also=(
+            (
+                "    scores, leads, curves, events = [], [], [], []\n",
+                "    scores, leads, curves, events = [], [], [], []\n    bad_leads = []\n",
+            ),
+            (
+                "                curves.append(curve.assign(**tag))\n",
+                "                curves.append(curve.assign(**tag))\n"
+                f"                _bad = {ON_FITTED_TEST}\n"
+                "                _rf = float(per_timestep(fitted.val, _bad)['f1'].mean())\n"
+                "                bad_leads.append(lead_time(per_timestep(fitted.test, _bad), table,"
+                " _rf, cfg.drift.f1_drop, cfg.drift.drop_run).assign(ref_f1=_rf, **tag))\n",
+            ),
+        ),
+    ),
+    Mutant(
+        "lead CSV's ref_f1 column at a test-searched threshold",
+        "mulegraph/pipeline.py",
+        "leads.append(lead.assign(ref_f1=ref_f1, **tag))",
+        "leads.append(lead.assign(ref_f1="
+        f"float(per_timestep(fitted.val, {ON_FITTED_TEST})['f1'].mean()), **tag))",
+        (DRIFT_E2E,),
+    ),
+    Mutant(
+        "logged ts_* metrics at a test-searched threshold",
+        "mulegraph/pipeline.py",
+        "for row in curve.itertuples(index=False):",
+        f"for row in per_timestep(test, {ON_TEST}).itertuples(index=False):",
+        (LOGGED_F1,),
+    ),
+    Mutant(
+        "labels folded into the detector batch ids (PR-R2)",
+        "mulegraph/pipeline.py",
+        "batch = data.batch_id[scored_idx]\n",
+        "batch = data.batch_id[scored_idx] + (data.y[scored_idx] == 1)\n",
+        (DRIFT_E2E,),
+    ),
 ]
 
-DRIFT = "drift D1-D3: rows wait for the end-to-end test #51 adds"
 SCORE = "score path: guarded by tests/test_score.py, no row yet"
 UNGUARDED = "score path: no test goes red on a test-searched threshold here yet"
 #: Every threshold-bearing line of pipeline.py that no row plants, with why (stripped line: reason).
@@ -125,9 +412,6 @@ UNPLANTED = {
     "threshold: float": "field declaration",
     "test_threshold: np.ndarray": "field declaration",
     "tests, thresholds, per_step, seconds = [], [], {}, 0.0": "empty-list initialiser",
-    "threshold=fitted.threshold,": DRIFT,
-    'ref_f1 = float(per_timestep(fitted.val, fitted.threshold)["f1"].mean())': DRIFT,
-    "table = event_windows(fitted.test, fitted.threshold, event)": DRIFT,
     'meta = {"threshold": fitted.threshold, "val_f1": fitted.val_f1, "commit": commit, '
     "**definition}": SCORE,
     'log.info("deployed model %s, validation threshold %.4f", model_path, fitted.threshold)': (
@@ -172,9 +456,11 @@ def _copy(repo_root: Path, tmp_path: Path) -> Path:
 def _plant(root: Path, mutant: Mutant) -> None:
     path = root / mutant.file
     text = path.read_text()
-    if text.count(mutant.site) != 1:
-        pytest.fail(f"site moved: re-check this guard ({mutant.name}, {mutant.file})")
-    path.write_text(text.replace(mutant.site, mutant.broken))
+    for site, broken in ((mutant.site, mutant.broken), *mutant.also):
+        if text.count(site) != 1:
+            pytest.fail(f"site moved: re-check this guard ({mutant.name}, {mutant.file})")
+        text = text.replace(site, broken)
+    path.write_text(text)
 
 
 def _run_pytest(root: Path, *args: str) -> subprocess.CompletedProcess[str]:
@@ -182,8 +468,9 @@ def _run_pytest(root: Path, *args: str) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
         [sys.executable, "-m", "pytest", "-q", "-p", "no:cacheprovider", *args],
         cwd=root,
-        # A wide terminal keeps each failure's reason on its summary line.
-        env={**os.environ, "PYTHONPATH": str(root), "COLUMNS": "1000"},
+        # A wide terminal keeps each failure's reason on its summary line. One thread per row:
+        # rows run side by side under xdist, and oversubscribed BLAS threads made them 7x slower.
+        env={**os.environ, "PYTHONPATH": str(root), "COLUMNS": "1000", "OMP_NUM_THREADS": "1"},
         capture_output=True,
         text=True,
     )
@@ -215,11 +502,32 @@ def test_every_threshold_use_is_planted_or_excused(repo_root: Path) -> None:
     text = path.read_text()
     planted = set()
     for m in MUTANTS:
-        if m.file == "mulegraph/pipeline.py" and m.site in text:
+        # A row that keeps its site verbatim and only inserts code beside it plants nothing there.
+        if m.file == "mulegraph/pipeline.py" and m.site in text and m.site not in m.broken:
             start = text[: text.index(m.site)].count("\n") + 1
             planted.update(range(start, start + m.site.count("\n") + 1))
     unplanted = [s for n, s in _threshold_lines(path).items() if n not in planted]
     assert sorted(unplanted) == sorted(UNPLANTED), "each needs a MUTANTS row or an UNPLANTED reason"
+
+
+#: Rows that recompute an F1, with the honest threshold in their scope.
+HONEST = {
+    "rolling ts_val_f1 at a test-searched threshold": (ON_TEST, "threshold"),
+    "drift val_f1 at a test-searched threshold": (ON_FITTED_TEST, "fitted.threshold"),
+    "benchmark val_f1 at a test-searched threshold": (ON_TEST, "fitted.threshold"),
+}
+
+
+@pytest.mark.parametrize("name", HONEST)
+def test_a_recomputed_f1_at_the_honest_threshold_passes(
+    name: str, repo_root: Path, tmp_path: Path
+) -> None:
+    """Control: the row is red for its threshold, not for how it recomputes F1."""
+    mutant = next(m for m in MUTANTS if m.name == name)
+    root = _copy(repo_root, tmp_path)
+    _plant(root, mutant._replace(broken=mutant.broken.replace(*HONEST[name])))
+    out = _run_pytest(root, *mutant.tests)
+    assert out.returncode == 0, out.stdout + out.stderr
 
 
 @pytest.mark.parametrize("mutant", MUTANTS, ids=[m.name for m in MUTANTS])

@@ -26,8 +26,11 @@ output: an MLflow metric, a CSV, a figure, a detector argument. For each, name
 its row in `tests/test_integrity_mutants.py`, which plants a threshold chosen
 on test rows there and requires its guard test to go red. A place with no row
 is a finding, even when the code there is correct today; so is an `UNPLANTED`
-reason that does not hold. Plant candidate rows with that file's `_copy`,
-`_plant` and `_run_pytest` helpers.
+reason that does not hold. Run the rows with `uv run pytest -m integrity -n auto`
+rather than rebuilding plants by hand. Report each new plant you think of as a
+row (site, broken replacement, must-fail test node) for the implementer to add;
+check one first, if you need to, with that file's `_copy`, `_plant` and
+`_run_pytest` helpers.
 
 **2. PR-F2 — feature causality.** Graph features use only edges with
 `time <= t`. Look for any aggregation, join, merge, groupby, or neighbour
