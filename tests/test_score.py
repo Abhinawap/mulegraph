@@ -11,6 +11,7 @@ import json
 import re
 from pathlib import Path
 from typing import Any
+from unittest import mock
 
 import numpy as np
 import pandas as pd
@@ -60,10 +61,9 @@ def test_queue_is_ranked_and_cut_at_the_validation_threshold(score_cfg: ScoreCon
     from mulegraph.eval.threshold import choose_threshold
     from mulegraph.features.builder import build_features
     from mulegraph.features.select import select_features
+    from mulegraph.models.xgb import XGBModel
     from mulegraph.splits.builder import build_split
     from mulegraph.util import Paths
-
-    alerts, health = _outputs(*pipeline.run_score(score_cfg)[:2])
 
     paths = Paths.from_env()
     data = pipeline.load_dataset(score_cfg.dataset, paths.data_dir)
@@ -72,9 +72,33 @@ def test_queue_is_ranked_and_cut_at_the_validation_threshold(score_cfg: ScoreCon
     split = build_split(data, score_cfg.split.regimes[0], cache_dir)
     fitted = pipeline.fit(data, feats, [split], score_cfg.model, 0, "cpu")
     assert fitted.threshold == choose_threshold(fitted.val.y, fitted.val.proba)[0]
+
+    # Two batch-10 units score exactly at the cut and one float32 below it, so any other cut
+    # moves the queue whatever the data. Batch 10 is a test batch: the val-chosen cut can't move.
+    today = np.flatnonzero(data.batch_id == BATCH)
+    at, below = np.float32(fitted.threshold), np.nextafter(np.float32(fitted.threshold), -np.inf)
+    original = XGBModel.predict_proba
+
+    def pinned(self: XGBModel, data: Any, feats: Any, idx: np.ndarray) -> np.ndarray:
+        proba = original(self, data, feats, idx)
+        proba[idx == today[0]], proba[idx == today[1]] = at, below
+        return proba
+
+    want = score_cfg.model_dump()  # the run must not rewrite what the test reads
+    with (
+        mock.patch.object(XGBModel, "predict_proba", pinned),
+        mock.patch.object(pipeline, "score_batches", wraps=pipeline.score_batches) as detect,
+    ):
+        alerts, health = _outputs(*pipeline.run_score(score_cfg)[:2])
+    assert score_cfg.model_dump() == want, "the run rewrote its config"
     assert health["threshold"] == fitted.threshold
+    assert detect.call_args.kwargs["threshold"] == fitted.threshold  # the health check (PR-R2)
+    queued = today[pinned(fitted.model, data, feats, today) >= fitted.threshold]
+    assert today[0] in queued and today[1] not in queued
+    assert sorted(alerts["unit"]) == queued.tolist()
     assert len(alerts) == health["alerts"] > 0
-    assert (alerts["score"] >= health["threshold"]).all()
+    # The CSV holds float32 scores; read back as float64 the one at the cut sits a hair under it.
+    assert (alerts["score"].astype(np.float32) >= np.float32(health["threshold"])).all()
     assert alerts["score"].is_monotonic_decreasing
     assert alerts["rank"].tolist() == list(range(1, len(alerts) + 1))
     assert (data.batch_id[alerts["unit"]] == BATCH).all()
