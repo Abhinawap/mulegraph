@@ -237,7 +237,9 @@ def test_every_logged_f1_is_scored_at_its_runs_validation_optimum(
 
     cfg: RunConfig = request.getfixturevalue(config)
     with mock.patch.object(pipeline, "plot_curves", wraps=pipeline.plot_curves) as draw:
-        pipeline.run_benchmark(cfg.model_copy(deep=True), pipeline.SMOKE_CONFIG)
+        pinned = cfg.model_dump()  # frozen stops assignment, not in-place edits
+        pipeline.run_benchmark(cfg, pipeline.SMOKE_CONFIG)
+        assert cfg.model_dump() == pinned, "the run rewrote its config"
     mlflow.set_tracking_uri(cfg.mlflow.resolved_uri())
     client = mlflow.MlflowClient()
     runs = mlflow.search_runs(

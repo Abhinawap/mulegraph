@@ -19,7 +19,7 @@ GfpFamily = Literal["fan", "degree", "scatter_gather", "lc_cycle"]
 
 
 class Strict(BaseModel):
-    model_config = {"extra": "forbid"}
+    model_config = {"extra": "forbid", "frozen": True}
 
 
 class SyntheticConfig(Strict):

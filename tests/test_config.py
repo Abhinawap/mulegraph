@@ -106,6 +106,12 @@ def test_sage_gets_a_default_sampler() -> None:
     assert cfg.models[0].sampler.kind == "neighbor"
 
 
+def test_config_fields_cannot_be_reassigned() -> None:
+    cfg = _cfg(models=[{"name": "sage", "features": "base"}])
+    with pytest.raises(ValidationError, match="frozen"):
+        cfg.models[0].sampler = None
+
+
 def test_needs_gfp_reflects_the_model_list() -> None:
     assert not _cfg().needs_gfp
     assert _cfg(models=[{"name": "xgb", "features": "base_gfp"}]).needs_gfp

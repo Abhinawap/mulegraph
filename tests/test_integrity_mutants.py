@@ -337,7 +337,9 @@ MUTANTS = [
         "mulegraph/pipeline.py",
         'ref_f1 = float(per_timestep(fitted.val, fitted.threshold)["f1"].mean())\n',
         'ref_f1 = float(per_timestep(fitted.val, fitted.threshold)["f1"].mean())\n'
-        '                cfg.drift.f1_drop = float(1 - curve["f1"].median())\n',
+        "                object.__setattr__(\n"
+        '                    cfg.drift, "f1_drop", float(1 - curve["f1"].median())\n'
+        "                )\n",
         (DRIFT_E2E,),
     ),
     Mutant(
@@ -345,8 +347,10 @@ MUTANTS = [
         "mulegraph/pipeline.py",
         "proba = fitted.model.predict_proba(data, feats, scored_idx)\n",
         "proba = fitted.model.predict_proba(data, feats, scored_idx)\n"
-        "                cfg.drift.calibrate = False\n"
-        '                cfg.drift.alert_flag = float(curve["f1"].min()) / 100\n',
+        '                object.__setattr__(cfg.drift, "calibrate", False)\n'
+        "                object.__setattr__(\n"
+        '                    cfg.drift, "alert_flag", float(curve["f1"].min()) / 100\n'
+        "                )\n",
         (DRIFT_E2E,),
     ),
     # From the integrity audit of #53.
