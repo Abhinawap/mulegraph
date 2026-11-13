@@ -44,6 +44,12 @@ file other than `tests/test_integrity_mutants.py`; then it keeps only the rows w
 name one of those files, plus `test_every_threshold_use_is_planted_or_excused`
 and `test_every_guard_passes_in_the_unplanted_copy`. CI runs every row on push.
 
+In every round, for each gate, selector or guard the diff (or a delta round's
+fix diff) adds or changes, list every kind of input it accepts: empty,
+unnormalised (`./` or `..` paths), out of tree, reached through an indirect
+dependency (a relative import, a config file). Probe each one before
+reporting, so a later round finds only what the fix introduced.
+
 An end-to-end test builds its expected values only from inputs pinned to a
 source the run under test cannot touch. A spied argument, or an object the run
 receives and could mutate, is not such a source until the test pins it.
