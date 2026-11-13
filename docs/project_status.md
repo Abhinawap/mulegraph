@@ -15,7 +15,8 @@
 - [x] Static HTML report per scored batch (21 Sep 2026).
 - [x] Planted-bug rows for every threshold use in `pipeline.py` outside the score path, drift included: 39 rows in `tests/test_integrity_mutants.py`, in their own CI job (7 Nov 2026).
 - [ ] Guard the score path's `score_batches(threshold=...)` and alert-queue cut in `tests/test_score.py` (no test goes red on a test-searched threshold there), then plant both as rows.
-- [ ] Hero figure of a laundering subgraph, and a screenshot of the report for the README. Optional polish.
+- [x] Hero figure of a laundering subgraph for the README (13 Nov 2026).
+- [ ] A screenshot of the score report for the README. Optional polish; needs a headless browser.
 
 What is done and when is in [changelog.md](changelog.md).
 

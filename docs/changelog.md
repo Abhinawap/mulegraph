@@ -6,6 +6,9 @@ Project history, newest first. Add a dated entry for every tag and every change 
 
 ## Unreleased
 
+### 13 Nov 2026 — README hero figure
+- **Added** `plot_laundering_subgraph` to `scripts/readme_figures.py` and its PNG to the README: from AMLworld HI-Small's labels, the largest connected group of laundering transactions with at most 30 accounts (ties go to the earliest; self-payments omitted), drawn with every transaction between those accounts. It is illustrative, with no model output. `networkx` comes in through torch and is not declared separately.
+
 ### 7 Nov 2026 — Frozen configs (#58)
 - **Changed** `mulegraph/config.py`: every config model is frozen, so assigning to a field raises. Validators that fill in defaults (`ModelConfig`'s sampler, `DatasetConfig`'s synthetic block) still do so through `object.__setattr__`.
 - **Tests**: a frozen model still allows in-place edits to its list and dict fields and `object.__setattr__`, so the drift and benchmark end-to-end PR-E4 tests no longer pass the run a deep copy of the config. They compare `cfg.model_dump()` before and after the run instead, and fail with "the run rewrote its config". Planted in `run_drift` and `run_benchmark`, a regime rewritten in place, `f1_drop` set through `object.__setattr__`, an appended seed and an updated `params` dict each fail on it (found by the integrity audit).

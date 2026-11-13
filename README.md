@@ -18,6 +18,13 @@ It answers them on two public datasets, Bitcoin transactions and a simulated ban
 transactions, and tests the models the way a bank would have to run them: trained on the past,
 scored on the future, never allowed to peek ahead.
 
+![A laundering network in AMLworld HI-Small](report/figures/readme_laundering_subgraph.png)
+
+*One account fans laundered money out to 29 others while also paying most of them ordinary
+transactions: the largest connected group of laundering transactions with at most 30 accounts
+(earliest first on ties, self-payments omitted), drawn from the dataset's labels by
+`scripts/readme_figures.py`.*
+
 ## What I found
 
 - **Graph features cut an analyst's alert queue about 6×.** On 5 million simulated bank
