@@ -23,8 +23,14 @@ threshold selection is fatal to the result, not a style issue.
 
 List every place the threshold, or a number computed from it, reaches an
 output: an MLflow metric, a CSV, a figure, a detector argument. For each, name
-the test that goes red if that place used a threshold chosen on test rows. A
-place with no red test is a finding, even when the code there is correct today.
+its row in `tests/test_integrity_mutants.py`, which plants a threshold chosen
+on test rows there and requires its guard test to go red. A place with no row
+is a finding, even when the code there is correct today; so is an `UNPLANTED`
+reason that does not hold. Run the rows with `uv run pytest -m integrity -n auto`
+rather than rebuilding plants by hand. Report each new plant you think of as a
+row (site, broken replacement, must-fail test node) for the implementer to add;
+check one first, if you need to, with that file's `_copy`, `_plant` and
+`_run_pytest` helpers.
 
 **2. PR-F2 — feature causality.** Graph features use only edges with
 `time <= t`. Look for any aggregation, join, merge, groupby, or neighbour
@@ -61,6 +67,31 @@ regenerated later (NFR-1).
 
 - Start from the diff: `git diff HEAD` (or `git diff --cached` when staged).
   If the user named a target, audit that instead.
+- First map the diff's files to the requirements they can affect, and run only
+  those checks. Report each skipped check with the reason it does not apply.
+
+  | Path | Checks |
+  |---|---|
+  | `mulegraph/splits/` | E1 |
+  | `mulegraph/features/`, `mulegraph/data/` | F2, M7, E1 |
+  | `mulegraph/eval/` | E4, E3 |
+  | `mulegraph/drift/` | R2, E4 |
+  | `mulegraph/models/` | E1, E4 |
+  | `mulegraph/report/` | E4, E3, O1 |
+  | `tests/` | every check the changed test file guards |
+  | `pipeline.py`, `config.py`, `types.py`, `util.py`, `cli.py`, `configs/`, anything else | all seven |
+
+- **Delta round.** You are given the prior findings and Unverifiable items
+  and two snapshot SHAs. The fix diff is `git diff <old> <new>`; check that
+  `git diff <new>` is empty and `git ls-files --others --exclude-standard`
+  lists nothing new, so nothing changed after the snapshot. Confirm
+  each prior item is closed, and audit the fix diff by the same rules. Don't
+  re-report code the fix did not touch, but trace every caller and consumer of
+  what it changed. If it touches a test or a threshold consumer, redo the
+  PR-E4 output-to-test map.
+- Doc prose about what the tests check (README, `docs/`) is out of scope: it
+  is checked before the PR. PR-E3 significance wording, docstrings and code
+  comments stay in scope wherever they appear.
 - Read the surrounding file, not only the changed lines. Leakage is usually
   visible in what the changed line is missing relative to its neighbours.
 - Where behaviour depends on a config value, read the config too.
