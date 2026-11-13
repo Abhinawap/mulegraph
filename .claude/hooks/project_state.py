@@ -19,13 +19,13 @@ PROJECT_DIR = Path(__file__).resolve().parents[2]
 STATUS = PROJECT_DIR / "docs" / "project_status.md"
 
 
-def git(*args: str) -> str | None:
+def git(*args: str, cwd: Path = PROJECT_DIR, timeout: float = 5) -> str | None:
     try:
         out = subprocess.run(
-            ["git", "-C", str(PROJECT_DIR), *args],
+            ["git", "-C", str(cwd), *args],
             capture_output=True,
             text=True,
-            timeout=5,
+            timeout=timeout,
         )
     except (OSError, subprocess.SubprocessError):
         return None
@@ -59,6 +59,36 @@ def build_context() -> str:
     branch = git("branch", "--show-current") or git("rev-parse", "--abbrev-ref", "HEAD")
     commit = git("rev-parse", "--short", "HEAD") or "no commits yet"
     lines.append(f"Git: {branch} @ {commit}")
+
+    git("fetch", "--quiet", "origin", "main", timeout=3)  # offline: the count below is stale
+    behind = git("rev-list", "--count", "main..origin/main")
+    if behind and behind != "0":
+        lines.append(f"main is {behind} commit(s) behind origin/main: pull before reporting status")
+
+    # Merged = reached through a merge; a fresh branch's tip sits on main's own line.
+    fmt = "--format=%(refname:short) %(objectname)"
+    own_line = set((git("rev-list", "--first-parent", "origin/main") or "").split())
+    merged = {
+        name
+        for name, sha in (
+            x.split() for x in (git("branch", "--merged", "origin/main", fmt) or "").splitlines()
+        )
+        if sha not in own_line
+    }
+    for block in (git("worktree", "list", "--porcelain") or "").split("\n\n")[1:]:
+        path = block.splitlines()[0].removeprefix("worktree ")
+        heads = [x for x in block.splitlines() if x.startswith("branch refs/heads/")]
+        branch = heads[0].removeprefix("branch refs/heads/") if heads else ""
+        dotgit = Path(path) / ".git"  # a linked worktree's .git is a "gitdir: <path>" file
+        gitdir = (
+            Path(dotgit.read_text().removeprefix("gitdir: ").strip())
+            if dotgit.is_file()
+            else dotgit
+        )
+        busy = [n for n in ("MERGE_HEAD", "rebase-merge", "rebase-apply") if (gitdir / n).exists()]
+        if busy or branch in merged:
+            why = f"{'/'.join(busy)} in progress" if busy else "branch merged"
+            lines.append(f"Stale worktree: {path} [{branch or 'detached'}] ({why})")
 
     dirty = git("status", "--porcelain")
     if dirty:

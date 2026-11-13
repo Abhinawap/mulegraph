@@ -58,6 +58,7 @@ def _outputs(alerts: Path, health: Path) -> tuple[pd.DataFrame, dict[str, Any]]:
 
 def test_queue_is_ranked_and_cut_at_the_validation_threshold(score_cfg: ScoreConfig) -> None:
     """PR-E4: the queue is cut at the threshold fit() picks on validation; alerts sit above it."""
+    from mulegraph.drift.detectors import alert_shift
     from mulegraph.eval.threshold import choose_threshold
     from mulegraph.features.builder import build_features
     from mulegraph.features.select import select_features
@@ -89,10 +90,35 @@ def test_queue_is_ranked_and_cut_at_the_validation_threshold(score_cfg: ScoreCon
         mock.patch.object(XGBModel, "predict_proba", pinned),
         mock.patch.object(pipeline, "score_batches", wraps=pipeline.score_batches) as detect,
     ):
-        alerts, health = _outputs(*pipeline.run_score(score_cfg)[:2])
+        alerts_path, health_path, page_path, _ = pipeline.run_score(score_cfg)
+        alerts, health = _outputs(alerts_path, health_path)
     assert score_cfg.model_dump() == want, "the run rewrote its config"
     assert health["threshold"] == fitted.threshold
     assert detect.call_args.kwargs["threshold"] == fitted.threshold  # the health check (PR-R2)
+    # The pinned unit also shows the threshold in the queue table, so match the labelled fact.
+    shown = f"<dt>Alert threshold (chosen on validation)</dt><dd>{fitted.threshold:.4f}</dd>"
+    page = page_path.read_text()
+    assert shown in page  # the page a person reads
+    s = pinned(fitted.model, data, feats, today)
+    order = np.argsort(-s, kind="stable")
+    ranked = today[order][s[order] >= fitted.threshold]
+    assert f": {ranked.size:,} alerts from {today.size:,} units</h1>" in page
+    # The alert-rate score and its calibrated flag level both use the threshold (PR-R2 inputs).
+    ref = np.flatnonzero(np.isin(data.batch_id, score_cfg.split.regimes[0].val))
+    p_ref, b_ref = pinned(fitted.model, data, feats, ref), data.batch_id[ref]
+    score = alert_shift(p_ref, s, fitted.threshold)
+    flag_at = max(
+        alert_shift(p_ref[b_ref != b], p_ref[b_ref == b], fitted.threshold)
+        for b in np.unique(b_ref)
+    )
+    assert {"detector": "alert", "score": score, "flag_at": flag_at} in health["detectors"]
+    assert ("alert" in health["flagged"]) == (score > flag_at)
+    yes = "yes" if score > flag_at else "no"
+    assert f"<td>{score:.3f}</td><td>{flag_at:.3f}</td><td>{yes}</td></tr>" in page
+    assert f"Top {min(TOP_ALERTS, ranked.size)} of {ranked.size:,}, ranked" in page
+    queue = page.split("<h2>Alert queue</h2>")[1].split("<h2>Provenance</h2>")[0]
+    rows = re.findall(r"<tr>\s*<td>\d+</td>\s*<td>[^<]*</td>\s*<td>([^<]*)</td>", queue)
+    assert rows == [str(i) for i in data.node_ids[ranked[:TOP_ALERTS]]]
     queued = today[pinned(fitted.model, data, feats, today) >= fitted.threshold]
     assert today[0] in queued and today[1] not in queued
     assert sorted(alerts["unit"]) == queued.tolist()
@@ -261,6 +287,7 @@ def test_the_report_escapes_what_the_data_supplies_and_truncates_the_queue(tmp_p
     assert "<script>alert" not in page and "&lt;script&gt;alert" in page
     assert "a &lt;note&gt;" in page
     assert f"Top {TOP_ALERTS} of 30" in page
+    assert "0.9000" in page  # the validation threshold
     assert page.count("&lt;script&gt;alert") == TOP_ALERTS
 
 

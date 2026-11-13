@@ -34,6 +34,8 @@ ON_FITTED_TEST = "choose_threshold(fitted.test.y, fitted.test.proba)[0]"
 ON_SPLIT_TEST = (
     "choose_threshold(data.y[split.test], model.predict_proba(data, feats, split.test))[0]"
 )
+DETECTOR_ROW = '{"detector": r.detector, "score": r.score, "flag_at": r.threshold}'
+ALERT_AT = '__import__("mulegraph.drift.detectors").drift.detectors.alert_shift'
 HEALTH_SITE = "alert_flag=h.alert_flag,\n        threshold=threshold,"
 LEAD_SITE = "lead = lead_time(curve, table, ref_f1, cfg.drift.f1_drop, cfg.drift.drop_run)"
 SCORE_ARGS = """feats.values[scored_idx], proba, batch, ref_batches, detectors=cfg.drift.detectors,
@@ -447,6 +449,57 @@ MUTANTS = [
         f'"threshold": {ON_SPLIT_TEST},',
         (SCORE_E2E,),
     ),
+    Mutant(
+        "report page's threshold searched on test",
+        "mulegraph/pipeline.py",
+        'page_path = write_score_report(tables_dir / f"{stem}_report.html", report, alerts)',
+        'page_path = write_score_report(tables_dir / f"{stem}_report.html",'
+        f' {{**report, "threshold": {ON_SPLIT_TEST}}}, alerts)',
+        (SCORE_E2E,),
+    ),
+    Mutant(
+        "health file and page's alert-rate score at a test-searched threshold",
+        "mulegraph/pipeline.py",
+        DETECTOR_ROW,
+        DETECTOR_ROW.replace(
+            '"score": r.score',
+            f'"score": {ALERT_AT}(proba[np.isin(batch, ref_batches)], scores, {ON_SPLIT_TEST})'
+            ' if r.detector == "alert" else r.score',
+        ),
+        (SCORE_E2E,),
+    ),
+    Mutant(
+        "health file and page's alert-rate flag level at a test-searched threshold",
+        "mulegraph/pipeline.py",
+        DETECTOR_ROW,
+        DETECTOR_ROW.replace(
+            '"flag_at": r.threshold',
+            f'"flag_at": max({ALERT_AT}(proba[np.isin(batch, ref_batches) & (batch != b)],'
+            f" proba[batch == b], {ON_SPLIT_TEST}) for b in ref_batches)"
+            ' if r.detector == "alert" else r.threshold',
+        ),
+        (SCORE_E2E,),
+    ),
+    Mutant(
+        "report page's alert count at a test-searched threshold",
+        "mulegraph/pipeline.py",
+        'page_path = write_score_report(tables_dir / f"{stem}_report.html", report, alerts)',
+        'page_path = write_score_report(tables_dir / f"{stem}_report.html",'
+        f' {{**report, "alerts": int((scores >= {ON_SPLIT_TEST}).sum())}}, alerts)',
+        (SCORE_E2E,),
+    ),
+    Mutant(
+        "report page's queue cut at a test-searched threshold",
+        "mulegraph/pipeline.py",
+        'page_path = write_score_report(tables_dir / f"{stem}_report.html", report, alerts)',
+        # Re-cut from today's scores, not a filter of alerts, so a lower test threshold shows too.
+        '_o = np.argsort(-scores, kind="stable")\n'
+        f"    _o = _o[scores[_o] >= {ON_SPLIT_TEST}]\n"
+        '    _q = pd.DataFrame({"rank": np.arange(1, _o.size + 1), "unit": units[_o],'
+        ' "score": scores[_o], "node_id": data.node_ids[units[_o]]})\n'
+        '    page_path = write_score_report(tables_dir / f"{stem}_report.html", report, _q)',
+        (SCORE_E2E,),
+    ),
 ]
 
 #: Every threshold-bearing line of pipeline.py that no row plants, with why (stripped line: reason).
@@ -457,9 +510,6 @@ UNPLANTED = {
     "tests, thresholds, per_step, seconds = [], [], {}, 0.0": "empty-list initialiser",
     'log.info("deployed model %s, validation threshold %.4f", model_path, fitted.threshold)': (
         "log line"
-    ),
-    '{"detector": r.detector, "score": r.score, "flag_at": r.threshold}': (
-        "a detector's flag level, not the decision threshold"
     ),
     "threshold,": "log line",
 }
