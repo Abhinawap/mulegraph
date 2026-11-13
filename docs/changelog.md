@@ -10,6 +10,9 @@ Project history, newest first. Add a dated entry for every tag and every change 
 - **Changed** `CLAUDE.md` → Repository Etiquette: start every branch in its own worktree (`git worktree add ../mulegraph-<issue> -b <feature|fix>/<description> origin/main`), since the main checkout is shared with other sessions. The naming rule and never committing to `main` are kept.
 - **Changed** the SessionStart hook: it warns when the main checkout has uncommitted changes, a sign another session is using it.
 
+### 13 Nov 2026 — Auditor lists a new gate's input kinds up front (#76)
+- **Changed** `.claude/agents/integrity-auditor.md`: in every round, for each gate, selector or guard the diff or fix diff adds or changes, the auditor lists every kind of input it accepts (empty, unnormalised, out of tree, reached through an indirect dependency) and probes each before reporting, so a later round finds only what the fix introduced. The audit of #75 found one such kind per round across three rounds.
+
 ### 13 Nov 2026 — Union merge for the changelog (#77)
 - **Added** `.gitattributes` with `docs/changelog.md merge=union`, so two PRs that each add an entry under `## Unreleased` merge without a conflict and keep both entries. Checked by hand in a scratch clone. Union can drop the blank line between the two new headings, so tidy it after merging.
 
