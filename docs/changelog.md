@@ -6,9 +6,10 @@ Project history, newest first. Add a dated entry for every tag and every change 
 
 ## Unreleased
 
-### 7 Nov 2026 — End-to-end PR-E4 check for the score path (#59)
+### 13 Nov 2026 — End-to-end PR-E4 check for the score path (#59)
 - **Tests** (`tests/test_score.py`): the queue test fits the model outside the run, then runs `run_score` with two batch-10 units' scores pinned at the validation threshold and one float32 step below it. It asserts the alert queue is exactly the batch's units at or above the threshold, with the first unit in and the second out, so any other cut moves the queue on any data. A spy on `score_batches` asserts the health check's alert-rate detector receives the validation threshold (PR-R2). The test compares the config's `model_dump()` before and after the run. Alert scores are compared with the threshold at float32, since a float32 score at exactly the cut reads back from the CSV a hair below it as float64.
 - **Checked** by planting a threshold searched on test at the queue cut (max-margin, highest tie, `0.9 ×` and one float32 step either side), the `score_batches` threshold, the deployed model's cached threshold, its read-back and the health file's copy; each fails the test.
+- **Rows**: those five sites are now rows of `tests/test_integrity_mutants.py` (44 in all), each planting a threshold searched on the deployed split's test rows and requiring the queue test to fail. The score path's `UNPLANTED` entries are gone, so no threshold use in `pipeline.py` is excused except declarations, an import, log lines and a detector's own flag level.
 
 ### 7 Nov 2026 — Frozen configs (#58)
 - **Changed** `mulegraph/config.py`: every config model is frozen, so assigning to a field raises. Validators that fill in defaults (`ModelConfig`'s sampler, `DatasetConfig`'s synthetic block) still do so through `object.__setattr__`.
