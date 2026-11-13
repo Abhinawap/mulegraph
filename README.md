@@ -148,8 +148,9 @@ flowchart LR
 - **The rules that make the numbers trustworthy are enforced by tests.** Every threshold the
   benchmark (on a temporal, a rolling and a mixed random, temporal and rolling config) and the
   drift monitor log is re-derived from its run's own validation data. Every test F1, precision
-  and recall either one logs, writes or draws, and the drift monitor's detector scores, lead
-  times and event-table recall, are recomputed at it from inputs the tests check, so a threshold
+  and recall either one logs, every per-timestep F1 it writes or draws, and the drift monitor's
+  detector scores, lead times and event-table recall, are recomputed at it from inputs the tests
+  check, so a threshold
   searched on test rows fails the build. A
   synthetic multi-timestep graph checks
   that features at time *t* are identical with and without later edges. A test checks that no
