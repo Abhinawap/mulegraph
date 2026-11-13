@@ -32,6 +32,10 @@ row (site, broken replacement, must-fail test node) for the implementer to add;
 check one first, if you need to, with that file's `_copy`, `_plant` and
 `_run_pytest` helpers.
 
+An end-to-end test builds its expected values only from inputs pinned to a
+source the run under test cannot touch. A spied argument, or an object the run
+receives and could mutate, is not such a source until the test pins it.
+
 **2. PR-F2 — feature causality.** Graph features use only edges with
 `time <= t`. Look for any aggregation, join, merge, groupby, or neighbour
 lookup that is not filtered by timestamp. The bug here is almost always an
