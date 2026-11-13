@@ -25,10 +25,16 @@ MIXED_REGIMES = LOGGED_F1.replace("[tiny_config]", "[multi_config]")
 DRIFT_E2E = (
     "tests/test_drift.py::test_every_drift_use_of_the_threshold_is_its_runs_validation_optimum"
 )
+SCORE_E2E = "tests/test_score.py::test_queue_is_ranked_and_cut_at_the_validation_threshold"
 #: The threshold searched on the test rows in scope, which no guarded site may use.
 ON_TEST = "choose_threshold(test.y, test.proba)[0]"
 #: The same, where the test rows in scope are a Fitted's.
 ON_FITTED_TEST = "choose_threshold(fitted.test.y, fitted.test.proba)[0]"
+#: The same in ``run_score``, scored by the deployed model on its split's test rows.
+ON_SPLIT_TEST = (
+    "choose_threshold(data.y[split.test], model.predict_proba(data, feats, split.test))[0]"
+)
+HEALTH_SITE = "alert_flag=h.alert_flag,\n        threshold=threshold,"
 LEAD_SITE = "lead = lead_time(curve, table, ref_f1, cfg.drift.f1_drop, cfg.drift.drop_run)"
 SCORE_ARGS = """feats.values[scored_idx], proba, batch, ref_batches, detectors=cfg.drift.detectors,
                     bins=cfg.drift.bins, psi_flag=cfg.drift.psi_flag, ks_alpha=cfg.drift.ks_alpha,
@@ -406,28 +412,55 @@ MUTANTS = [
         "batch = data.batch_id[scored_idx] + (data.y[scored_idx] == 1)\n",
         (DRIFT_E2E,),
     ),
+    Mutant(
+        "deployed model's cached threshold searched on test",
+        "mulegraph/pipeline.py",
+        'meta = {"threshold": fitted.threshold,',
+        f'meta = {{"threshold": {ON_FITTED_TEST},',
+        (SCORE_E2E,),
+    ),
+    Mutant(
+        "score threshold read back as a test-searched one",
+        "mulegraph/pipeline.py",
+        'threshold = fit_meta["threshold"]',
+        f"threshold = {ON_SPLIT_TEST}",
+        (SCORE_E2E,),
+    ),
+    Mutant(
+        "health check's alert-rate detector at a test-searched threshold (PR-R2)",
+        "mulegraph/pipeline.py",
+        HEALTH_SITE,
+        HEALTH_SITE.replace("threshold=threshold,", f"threshold={ON_SPLIT_TEST},"),
+        (SCORE_E2E,),
+    ),
+    Mutant(
+        "alert queue cut at a test-searched threshold",
+        "mulegraph/pipeline.py",
+        "order = order[scores[order] >= threshold]",
+        f"order = order[scores[order] >= {ON_SPLIT_TEST}]",
+        (SCORE_E2E,),
+    ),
+    Mutant(
+        "health file's threshold searched on test",
+        "mulegraph/pipeline.py",
+        '"threshold": threshold,',
+        f'"threshold": {ON_SPLIT_TEST},',
+        (SCORE_E2E,),
+    ),
 ]
 
-SCORE = "score path: guarded by tests/test_score.py, no row yet"
-UNGUARDED = "score path: no test goes red on a test-searched threshold here yet"
 #: Every threshold-bearing line of pipeline.py that no row plants, with why (stripped line: reason).
 UNPLANTED = {
     "from mulegraph.eval.threshold import choose_threshold": "import",
     "threshold: float": "field declaration",
     "test_threshold: np.ndarray": "field declaration",
     "tests, thresholds, per_step, seconds = [], [], {}, 0.0": "empty-list initialiser",
-    'meta = {"threshold": fitted.threshold, "val_f1": fitted.val_f1, "commit": commit, '
-    "**definition}": SCORE,
     'log.info("deployed model %s, validation threshold %.4f", model_path, fitted.threshold)': (
         "log line"
     ),
-    'threshold = fit_meta["threshold"]': SCORE,
-    "threshold=threshold,": UNGUARDED,
-    "order = order[scores[order] >= threshold]": UNGUARDED,
     '{"detector": r.detector, "score": r.score, "flag_at": r.threshold}': (
         "a detector's flag level, not the decision threshold"
     ),
-    '"threshold": threshold,': SCORE,
     "threshold,": "log line",
 }
 
