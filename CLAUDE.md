@@ -121,6 +121,8 @@ uv run mlflow ui --backend-store-uri sqlite:///mlruns/mlflow.db
 
 CI (GitHub Actions) runs ruff, pytest with coverage, and `mulegraph smoke` on every push, and the planted-bug rows (`-m integrity`) in their own job. The full grid NEVER runs in CI.
 
+- A module-scoped fixture that runs a benchmark needs `pytestmark = pytest.mark.xdist_group("<module>")`; `addopts` carries `--dist loadgroup`, so the module stays on one worker under `-n`.
+
 Required unit tests (NFR-2):
 - Loaders — shapes, dtypes, label counts, `meta.cross_time_edges` set correctly
 - Feature causality — on a **synthetic multi-timestep fixture**, features at `t` are identical with and without edges from `t+1…T`. Skipped with a logged reason on Elliptic, where it is vacuous.
