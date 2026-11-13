@@ -65,7 +65,7 @@ select = ["E", "F", "I", "B", "UP", "SIM"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-addopts = "-m 'not integrity'"
+addopts = "-m 'not integrity' --dist loadgroup"
 markers = [
     "elliptic: requires the real Elliptic++ raw CSVs on disk",
     "slow: end-to-end runs measured in tens of seconds",
