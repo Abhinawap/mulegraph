@@ -6,6 +6,9 @@ Project history, newest first. Add a dated entry for every tag and every change 
 
 ## Unreleased
 
+### 13 Nov 2026 — README hero figure
+- **Added** `plot_laundering_subgraph` to `scripts/readme_figures.py` and its PNG to the README: from AMLworld HI-Small's labels, the largest connected group of laundering transactions with at most 30 accounts (ties go to the earliest; self-payments omitted), drawn with every transaction between those accounts. It is illustrative, with no model output. `networkx` comes in through torch and is not declared separately.
+
 ### 13 Nov 2026 — End-to-end PR-E4 check for the score path (#59)
 - **Tests** (`tests/test_score.py`): the queue test fits the model outside the run, then runs `run_score` with two batch-10 units' scores pinned at the validation threshold and one float32 step below it. It asserts the alert queue is exactly the batch's units at or above the threshold, with the first unit in and the second out, so any other cut moves the queue on any data. A spy on `score_batches` asserts the health check's alert-rate detector receives the validation threshold (PR-R2). The test compares the config's `model_dump()` before and after the run. Alert scores are compared with the threshold at float32, since a float32 score at exactly the cut reads back from the CSV a hair below it as float64.
 - **Checked** by planting a threshold searched on test at the queue cut (max-margin, highest tie, `0.9 ×` and one float32 step either side), the `score_batches` threshold, the deployed model's cached threshold, its read-back and the health file's copy; each fails the test.
