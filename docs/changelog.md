@@ -6,6 +6,13 @@ Project history, newest first. Add a dated entry for every tag and every change 
 
 ## Unreleased
 
+### 13 Nov 2026 — Cheaper integrity gate for parallel sessions (#68)
+- **Changed** `pyproject.toml`: `addopts = "-m 'not integrity'"`, so a bare `pytest` skips the planted-bug tests (49 rows and their controls); `-m integrity` still selects them. The implementer brief runs CI's `-m "not elliptic and not integrity"`, since any explicit `-m` replaces the default.
+- **Changed** the local integrity command to `flock /tmp/mulegraph-integrity.lock uv run pytest -m integrity -n 3`, so a second session waits instead of both running out of memory; CI keeps `-n auto`.
+- **Changed** the auditor brief: a diff touching `mulegraph/` runs every row; a diff touching only tests, docs, configs or agent files runs the rows whose guard test changed plus the two control tests. Existing rows are never re-planted by hand.
+- **Changed** the SessionStart hook: it fetches `origin/main`, says how far `main` is behind, and lists worktrees whose branch is merged or that hold a merge or rebase in progress.
+- **Tests** (`tests/test_score.py`): the queue test asserts the report page a run writes states the validation threshold, gives the queue's size in its heading and above the table, shows the alert-rate score and flag level recomputed from the test's own scores (as the health file does), and lists its top units in rank order; the report-page unit test asserts the renderer prints the threshold. Three new rows plant a test-searched threshold in the page `run_score` writes, in its threshold, its heading's alert count and a re-cut queue, and require the queue test to fail. Two more plant it in the alert-rate detector's score and calibrated flag level as the health file and page write them; that line's `UNPLANTED` entry ("a detector's flag level") is gone, since both values are computed from the threshold (49 rows; found by the integrity audit).
+
 ### 13 Nov 2026 — README hero figure
 - **Added** `plot_laundering_subgraph` to `scripts/readme_figures.py` and its PNG to the README: from AMLworld HI-Small's labels, the largest connected group of laundering transactions with at most 30 accounts (ties go to the earliest; self-payments omitted), drawn with every transaction between those accounts. It is illustrative, with no model output. `networkx` comes in through torch and is not declared separately.
 
