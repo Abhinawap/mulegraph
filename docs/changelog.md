@@ -6,6 +6,11 @@ Project history, newest first. Add a dated entry for every tag and every change 
 
 ## Unreleased
 
+### 13 Nov 2026 — Shared benchmark runs in the pipeline tests (#72)
+- **Tests** (`tests/test_pipeline.py`): a module-scoped `benchmark` fixture runs each of the three configs at most once and shares the run's outputs (results table, MLflow rows, the curves passed to `plot_curves`, whether the config's `model_dump()` survived), never the config object: each test builds a fresh config for its expected values. The file makes 5 benchmark runs instead of 12; the rerun test keeps its own root so its second run cannot add to the shared store. Node ids are unchanged where the planted-bug rows run them (without `-n`), so each row reaches the same guard; a guard run alone still makes its own run.
+- **Changed** `pyproject.toml`: `--dist loadgroup` in `addopts`, and the module is one xdist group, so under `-n` its shared runs happen on one worker instead of once per worker.
+- **Measured**: `pytest -m "not elliptic and not integrity" -n 3`, old then new back to back on the laptop at load ≈ 19: 1021 s → 513 s; the file alone 54 s → 22 s.
+
 ### 13 Nov 2026 — Cheaper integrity gate for parallel sessions (#68)
 - **Changed** `pyproject.toml`: `addopts = "-m 'not integrity'"`, so a bare `pytest` skips the planted-bug tests (49 rows and their controls); `-m integrity` still selects them. The implementer brief runs CI's `-m "not elliptic and not integrity"`, since any explicit `-m` replaces the default.
 - **Changed** the local integrity command to `flock /tmp/mulegraph-integrity.lock uv run pytest -m integrity -n 3`, so a second session waits instead of both running out of memory; CI keeps `-n auto`.

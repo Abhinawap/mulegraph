@@ -7,7 +7,9 @@ alone: ``pipeline.fit`` is the one place test data could reach it.
 from __future__ import annotations
 
 import csv
+from collections.abc import Callable, Iterator
 from pathlib import Path
+from typing import NamedTuple
 from unittest import mock
 
 import numpy as np
@@ -24,15 +26,29 @@ from mulegraph.splits.builder import build_split, rolling_steps
 from mulegraph.types import FeatureMatrix, GraphDataset
 from mulegraph.util import Paths
 
+#: One xdist worker for the module, so each shared run happens once (--dist loadgroup).
+pytestmark = pytest.mark.xdist_group("pipeline")
+
 METRICS = ["f1", "pr_auc", "p_at_r50"]
 SEEDS = [0, 1]
 
 
-@pytest.fixture
-def tiny_config(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> RunConfig:
-    """Two xgb configs over two seeds, one temporal regime, on a 600-node synthetic graph."""
-    monkeypatch.setenv("MULEGRAPH_DATA_DIR", str(tmp_path / "data"))
-    monkeypatch.setenv("MULEGRAPH_REPORT_DIR", str(tmp_path / "report"))
+def _config(name: str, root: Path) -> RunConfig:
+    """A fresh config, so no expectation reads an object a run could have edited (PR-E4)."""
+    temporal = {"regime": "temporal", "train_end": 6, "val": [7, 8], "test": [9, 12]}
+    xgb = {"name": "xgb", "params": {"n_estimators": 20}}
+    rolling = {**temporal, "regime": "temporal_rolling"}
+    experiment, regimes, models = {
+        "tiny_config": ("pipeline_test", [temporal], ["base", "base_gfp"]),
+        # Four rolling refits per seed.
+        "rolling_config": ("pipeline_rolling_test", [rolling], ["base"]),
+        # All three regimes at once, as the Elliptic configs mix them.
+        "multi_config": (
+            "pipeline_multi_test",
+            [{"regime": "random"}, temporal, rolling],
+            ["base", "base_gfp"],
+        ),
+    }[name]
     return RunConfig.model_validate(
         {
             "dataset": {
@@ -41,74 +57,67 @@ def tiny_config(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> RunConfig:
                 "synthetic": {"n_nodes": 600, "n_timesteps": 12, "illicit_rate": 0.2, "seed": 0},
             },
             "features": {"bins": [2, 4], "cycle_len": 4, "num_threads": 2},
-            "split": {
-                "regimes": [{"regime": "temporal", "train_end": 6, "val": [7, 8], "test": [9, 12]}]
-            },
-            "models": [
-                {"name": "xgb", "features": "base", "params": {"n_estimators": 20}},
-                {"name": "xgb", "features": "base_gfp", "params": {"n_estimators": 20}},
-            ],
+            "split": {"regimes": regimes},
+            "models": [{**xgb, "features": f} for f in models],
             "seeds": SEEDS,
             "eval": {"metrics": METRICS},
-            "mlflow": {
-                "experiment": "pipeline_test",
-                "tracking_uri": f"sqlite:///{tmp_path / 'mlflow.db'}",
-            },
+            "mlflow": {"experiment": experiment, "tracking_uri": f"sqlite:///{root / 'mlflow.db'}"},
             "device": "cpu",
         }
     )
 
 
-@pytest.fixture
-def rolling_config(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> RunConfig:
-    """One xgb config, four rolling refits per seed, on the same 600-node synthetic graph."""
-    monkeypatch.setenv("MULEGRAPH_DATA_DIR", str(tmp_path / "data"))
-    monkeypatch.setenv("MULEGRAPH_REPORT_DIR", str(tmp_path / "report"))
-    return RunConfig.model_validate(
-        {
-            "dataset": {
-                "name": "synthetic_elliptic",
-                "version": "test",
-                "synthetic": {"n_nodes": 600, "n_timesteps": 12, "illicit_rate": 0.2, "seed": 0},
-            },
-            "features": {"bins": [2, 4], "cycle_len": 4, "num_threads": 2},
-            "split": {
-                "regimes": [
-                    {"regime": "temporal_rolling", "train_end": 6, "val": [7, 8], "test": [9, 12]}
-                ]
-            },
-            "models": [{"name": "xgb", "features": "base", "params": {"n_estimators": 20}}],
-            "seeds": SEEDS,
-            "eval": {"metrics": METRICS},
-            "mlflow": {
-                "experiment": "pipeline_rolling_test",
-                "tracking_uri": f"sqlite:///{tmp_path / 'mlflow.db'}",
-            },
-            "device": "cpu",
-        }
-    )
+@pytest.fixture(scope="module")
+def shared_root(tmp_path_factory: pytest.TempPathFactory) -> Iterator[Path]:
+    """One data, report and MLflow root for the module's shared runs."""
+    root = tmp_path_factory.mktemp("pipeline")
+    with pytest.MonkeyPatch.context() as mp:
+        mp.setenv("MULEGRAPH_DATA_DIR", str(root / "data"))
+        mp.setenv("MULEGRAPH_REPORT_DIR", str(root / "report"))
+        yield root
+
+
+class Run(NamedTuple):
+    """What one benchmark run left behind; its tables and MLflow rows live under the root."""
+
+    table: Path
+    #: The config's model_dump() was unchanged by the run.
+    config_kept: bool
+    #: Each curves frame plot_curves was called with.
+    drawn: tuple[pd.DataFrame, ...]
+
+
+@pytest.fixture(scope="module")
+def benchmark(shared_root: Path) -> Callable[[str], Run]:
+    """Run each config at most once per module and share its outputs, never its config."""
+    done: dict[str, Run] = {}
+
+    def run(name: str) -> Run:
+        if name not in done:
+            cfg = _config(name, shared_root)
+            pinned = cfg.model_dump()  # frozen stops assignment, not in-place edits
+            with mock.patch.object(pipeline, "plot_curves", wraps=pipeline.plot_curves) as draw:
+                table = pipeline.run_benchmark(cfg, pipeline.SMOKE_CONFIG)
+            drawn = tuple(c.args[0].copy() for c in draw.call_args_list)
+            done[name] = Run(table, cfg.model_dump() == pinned, drawn)
+        return done[name]
+
+    return run
 
 
 @pytest.fixture
-def multi_config(tiny_config: RunConfig) -> RunConfig:
-    """tiny_config under all three regimes at once, as the Elliptic configs mix them."""
-    raw = tiny_config.model_dump()
-    temporal = raw["split"]["regimes"][0]
-    raw["split"]["regimes"] = [
-        {"regime": "random"},
-        temporal,
-        {**temporal, "regime": "temporal_rolling"},
-    ]
-    raw["mlflow"]["experiment"] = "pipeline_multi_test"
-    return RunConfig.model_validate(raw)
+def tiny_config(shared_root: Path) -> RunConfig:
+    return _config("tiny_config", shared_root)
 
 
-def test_rolling_regime_writes_one_child_run_per_seed(
-    rolling_config: RunConfig, tmp_path: Path
-) -> None:
+@pytest.fixture
+def rolling_config(shared_root: Path) -> RunConfig:
+    return _config("rolling_config", shared_root)
+
+
+def test_rolling_regime_writes_one_child_run_per_seed(benchmark: Callable[[str], Run]) -> None:
     """PR-E7: n_seeds counts (model, seed) child runs, not the internal per-step refits."""
-    table = pipeline.run_benchmark(rolling_config, pipeline.SMOKE_CONFIG)
-    with open(table, newline="") as fh:
+    with open(benchmark("rolling_config").table, newline="") as fh:
         rows = list(csv.DictReader(fh))
     assert rows
     assert {r["regime"] for r in rows} == {"temporal_rolling"}
@@ -118,12 +127,10 @@ def test_rolling_regime_writes_one_child_run_per_seed(
 
 
 def test_rolling_curve_has_one_row_per_seed_and_test_timestep(
-    rolling_config: RunConfig, tmp_path: Path
+    benchmark: Callable[[str], Run],
 ) -> None:
-    pipeline.run_benchmark(rolling_config, pipeline.SMOKE_CONFIG)
-    with open(
-        tmp_path / "report" / "tables" / "pipeline_rolling_test_curves.csv", newline=""
-    ) as fh:
+    benchmark("rolling_config")
+    with open(Paths.from_env().tables_dir() / "pipeline_rolling_test_curves.csv", newline="") as fh:
         rows = list(csv.DictReader(fh))
     assert len(rows) == len(SEEDS) * 4
     assert {r["time"] for r in rows} == {str(t) for t in range(9, 13)}
@@ -131,12 +138,12 @@ def test_rolling_curve_has_one_row_per_seed_and_test_timestep(
 
 
 def test_rolling_test_idx_covers_every_labelled_node_in_the_window(
-    rolling_config: RunConfig, tmp_path: Path
+    rolling_config: RunConfig, benchmark: Callable[[str], Run]
 ) -> None:
     """The stitched test set across steps equals every labelled node in batches 9..12."""
     import mlflow
 
-    pipeline.run_benchmark(rolling_config, pipeline.SMOKE_CONFIG)
+    benchmark("rolling_config")
     mlflow.set_tracking_uri(rolling_config.mlflow.resolved_uri())
     runs = mlflow.search_runs(
         experiment_names=["pipeline_rolling_test"], filter_string="tags.kind = 'child'"
@@ -147,10 +154,7 @@ def test_rolling_test_idx_covers_every_labelled_node_in_the_window(
     frame = pd.read_parquet(path)
     test_idx = set(frame.loc[frame["part"] == "test", "idx"].tolist())
 
-    from mulegraph.util import Paths
-
-    paths = Paths.from_env()
-    data = pipeline.load_dataset(rolling_config.dataset, paths.data_dir)
+    data = load_dataset(rolling_config.dataset, Paths.from_env().data_dir)
     labelled = data.labelled_idx
     expected = set(
         labelled[(data.batch_id[labelled] >= 9) & (data.batch_id[labelled] <= 12)].tolist()
@@ -190,10 +194,12 @@ def test_each_rolling_step_is_decided_at_its_own_validation_threshold(
     assert rolling.threshold == alone.threshold
 
 
-def test_run_benchmark_writes_the_results_table(tiny_config: RunConfig, tmp_path: Path) -> None:
-    table = pipeline.run_benchmark(tiny_config, pipeline.SMOKE_CONFIG)
+def test_run_benchmark_writes_the_results_table(
+    benchmark: Callable[[str], Run], shared_root: Path
+) -> None:
+    table = benchmark("tiny_config").table
 
-    assert table == tmp_path / "report" / "tables" / "pipeline_test_results.csv"
+    assert table == shared_root / "report" / "tables" / "pipeline_test_results.csv"
     with open(table, newline="") as fh:
         rows = list(csv.DictReader(fh))
         fh.seek(0)
@@ -213,33 +219,31 @@ def test_run_benchmark_writes_the_results_table(tiny_config: RunConfig, tmp_path
 
 
 def test_run_benchmark_writes_per_timestep_curves_and_figure(
-    tiny_config: RunConfig, tmp_path: Path
+    tiny_config: RunConfig, benchmark: Callable[[str], Run], shared_root: Path
 ) -> None:
     """PR-E5: one curve row per (fit, test timestep); the figure lands beside the tables."""
-    pipeline.run_benchmark(tiny_config, pipeline.SMOKE_CONFIG)
+    benchmark("tiny_config")
 
-    with open(tmp_path / "report" / "tables" / "pipeline_test_curves.csv", newline="") as fh:
+    with open(shared_root / "report" / "tables" / "pipeline_test_curves.csv", newline="") as fh:
         rows = list(csv.DictReader(fh))
     test_timesteps = 12 - 9 + 1
     assert len(rows) == tiny_config.total_fits() * test_timesteps
     assert {r["time"] for r in rows} == {str(t) for t in range(9, 13)}
     assert {r["seed"] for r in rows} == {str(s) for s in SEEDS}
-    assert (tmp_path / "report" / "figures" / "pipeline_test_curves.png").stat().st_size > 0
+    assert (shared_root / "report" / "figures" / "pipeline_test_curves.png").stat().st_size > 0
 
 
 @pytest.mark.parametrize("config", ["tiny_config", "rolling_config", "multi_config"])
 def test_every_logged_f1_is_scored_at_its_runs_validation_optimum(
-    config: str, request: pytest.FixtureRequest
+    config: str, benchmark: Callable[[str], Run], shared_root: Path
 ) -> None:
     """PR-E4 end to end: each child run's threshold and every F1 it logs re-derive from its rows."""
     import mlflow
     from sklearn.metrics import f1_score, precision_score, recall_score
 
-    cfg: RunConfig = request.getfixturevalue(config)
-    with mock.patch.object(pipeline, "plot_curves", wraps=pipeline.plot_curves) as draw:
-        pinned = cfg.model_dump()  # frozen stops assignment, not in-place edits
-        pipeline.run_benchmark(cfg, pipeline.SMOKE_CONFIG)
-        assert cfg.model_dump() == pinned, "the run rewrote its config"
+    shared = benchmark(config)
+    assert shared.config_kept, "the run rewrote its config"
+    cfg = _config(config, shared_root)
     mlflow.set_tracking_uri(cfg.mlflow.resolved_uri())
     client = mlflow.MlflowClient()
     runs = mlflow.search_runs(
@@ -247,7 +251,7 @@ def test_every_logged_f1_is_scored_at_its_runs_validation_optimum(
     )
     assert len(runs) == len(cfg.models) * len(cfg.seeds) * len(cfg.split.regimes)
     curves = pd.read_csv(Paths.from_env().tables_dir() / f"{cfg.mlflow.experiment}_curves.csv")
-    assert draw.call_count == 1
+    assert len(shared.drawn) == 1
     data, _, cache_dir = _base_inputs(cfg)
     regimes = {r.regime: r for r in cfg.split.regimes}
     for run_id in runs["run_id"]:
@@ -287,7 +291,7 @@ def test_every_logged_f1_is_scored_at_its_runs_validation_optimum(
         ts_f1 = {m.step: m.value for m in client.get_metric_history(run_id, "ts_f1")}
         assert ts_f1 == pytest.approx(per_batch)
         # So are the curves table and the curves the figure draws (PR-E5).
-        for table in (curves, draw.call_args.args[0]):
+        for table in (curves, shared.drawn[0]):
             mine = table[
                 (table["regime"] == tags["regime"])
                 & (table["model"] == tags["model"])
@@ -298,12 +302,12 @@ def test_every_logged_f1_is_scored_at_its_runs_validation_optimum(
 
 
 def test_every_logged_rolling_step_threshold_is_its_own_validation_optimum(
-    rolling_config: RunConfig,
+    rolling_config: RunConfig, benchmark: Callable[[str], Run]
 ) -> None:
     """PR-E4, PR-E7 end to end: each logged ts_threshold and ts_val_f1 is its step's own."""
     import mlflow
 
-    pipeline.run_benchmark(rolling_config, pipeline.SMOKE_CONFIG)
+    benchmark("rolling_config")
     data, feats, cache_dir = _base_inputs(rolling_config)
     regime = rolling_config.split.regimes[0]
     steps = [build_split(data, s, cache_dir) for s in rolling_steps(regime)]
@@ -344,12 +348,12 @@ def test_the_threshold_is_the_validation_optimum_applied_to_every_test_row(
 
 
 def test_every_child_run_carries_its_provenance_and_an_honest_trial_count(
-    tiny_config: RunConfig,
+    tiny_config: RunConfig, benchmark: Callable[[str], Run]
 ) -> None:
     """The reporter refuses a missing tag, so a run that logs one is caught here first (PR-O1)."""
     import mlflow
 
-    pipeline.run_benchmark(tiny_config, pipeline.SMOKE_CONFIG)
+    benchmark("tiny_config")
     mlflow.set_tracking_uri(tiny_config.mlflow.resolved_uri())
     runs = mlflow.search_runs(
         experiment_names=["pipeline_test"], filter_string="tags.kind = 'child'"
@@ -371,14 +375,19 @@ def test_every_child_run_carries_its_provenance_and_an_honest_trial_count(
     assert runs["metrics.test_f1"].notna().all()
 
 
-def test_rerunning_a_config_does_not_pool_the_old_seeds(tiny_config: RunConfig) -> None:
+def test_rerunning_a_config_does_not_pool_the_old_seeds(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """PR-E3: the same two seeds run twice are two seeds, not four.
 
     Pooling them would report n = 4 and divide the half-width by sqrt(4) with t(3)
     instead of t(1) — a much tighter interval on no new evidence.
     """
-    pipeline.run_benchmark(tiny_config, pipeline.SMOKE_CONFIG)
-    table = pipeline.run_benchmark(tiny_config, pipeline.SMOKE_CONFIG)
+    # Its own root: the second run must not add to the shared runs' store.
+    monkeypatch.setenv("MULEGRAPH_DATA_DIR", str(tmp_path / "data"))
+    monkeypatch.setenv("MULEGRAPH_REPORT_DIR", str(tmp_path / "report"))
+    pipeline.run_benchmark(_config("tiny_config", tmp_path), pipeline.SMOKE_CONFIG)
+    table = pipeline.run_benchmark(_config("tiny_config", tmp_path), pipeline.SMOKE_CONFIG)
 
     with open(table, newline="") as fh:
         rows = list(csv.DictReader(fh))
