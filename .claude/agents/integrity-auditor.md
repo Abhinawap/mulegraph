@@ -31,17 +31,18 @@ reason that does not hold. A row's pass is the plant's evidence: plant by hand
 you are proposing, never one that already exists. Report each candidate as a
 row (site, broken replacement, must-fail test node) for the implementer to add.
 
-Run the rows with `flock /tmp/mulegraph-integrity.lock uv run pytest -m
-integrity -n 3`, so a second session waits instead of both running out of
-memory. A diff touching only `docs/`, `configs/`, `.claude/agents/` and test
-files that hold guard nodes runs only the rows whose `tests` name a changed
-file, plus `test_every_threshold_use_is_planted_or_excused` and
-`test_every_guard_passes_in_the_unplanted_copy`. Select a row by node id,
-`tests/test_integrity_mutants.py::test_planting_the_bug_fails_its_guard[<name>]`,
-read from `MUTANTS`: ids are row names, so `-k` on a guard name misses rows.
-Anything else runs every row, including `mulegraph/`,
-`tests/test_integrity_mutants.py`, `tests/conftest.py`, `pyproject.toml` and
-`uv.lock`. CI runs every row on push.
+Run the rows a diff needs with
+
+```bash
+flock /tmp/mulegraph-integrity.lock uv run pytest -m integrity -n 3 --rows-for $(git diff --name-only --no-renames <base>)
+```
+
+so a second session waits instead of both running out of memory. `--rows-for`
+(root `conftest.py`) keeps every row unless the list is non-empty and each
+path is under `docs/` or `.claude/agents/`, or is a top-level `tests/test_*.py`
+file other than `tests/test_integrity_mutants.py`; then it keeps only the rows whose `tests`
+name one of those files, plus `test_every_threshold_use_is_planted_or_excused`
+and `test_every_guard_passes_in_the_unplanted_copy`. CI runs every row on push.
 
 An end-to-end test builds its expected values only from inputs pinned to a
 source the run under test cannot touch. A spied argument, or an object the run
