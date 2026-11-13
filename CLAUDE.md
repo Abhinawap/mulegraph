@@ -84,7 +84,7 @@ All code is written under the **ponytail** skill (`/ponytail`, full level). Befo
 
 ## Repository Etiquette
 
-- ALWAYS branch before major changes: `feature/description` or `fix/description`. NEVER commit directly to `main`.
+- Start every branch in its own worktree: `git worktree add ../mulegraph-<issue> -b <feature|fix>/<description> origin/main`. The main checkout is shared with other sessions. NEVER commit directly to `main`.
 - Run `ruff check .` and `pytest` before pushing. NEVER force push to `main`.
 - Changes to splits, features, evaluation, thresholding, drift or model fitting: commit and open the PR only after the `integrity-auditor` agent returns PASS on the final diff. Before each round, snapshot the tree with `git add -A && git stash create`. The first audit is a full round; after each fix, run a delta round with a fresh auditor (never a resumed one) given the prior findings and Unverifiable items and the previous and current snapshot SHAs. Before the final snapshot, the session opening the PR checks that every claim in README and `docs/` about what a test asserts matches the test; a mismatch blocks the PR. `/code-review` is not part of this gate; `/ponytail-review` covers standards.
 - Commit messages describe the change and, where relevant, the requirement ID it satisfies (e.g. `PR-F2`).

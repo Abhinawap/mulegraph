@@ -75,7 +75,14 @@ def build_context() -> str:
         )
         if sha not in own_line
     }
-    for block in (git("worktree", "list", "--porcelain") or "").split("\n\n")[1:]:
+    blocks = (git("worktree", "list", "--porcelain") or "").split("\n\n")
+    main_path = blocks[0].splitlines()[0].removeprefix("worktree ") if blocks[0] else ""
+    if main_path and git("status", "--porcelain", cwd=Path(main_path)):
+        lines.append(
+            f"Main checkout {main_path} has uncommitted changes: another session may be "
+            "using it; start your branch in a worktree."
+        )
+    for block in blocks[1:]:
         path = block.splitlines()[0].removeprefix("worktree ")
         heads = [x for x in block.splitlines() if x.startswith("branch refs/heads/")]
         branch = heads[0].removeprefix("branch refs/heads/") if heads else ""
