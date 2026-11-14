@@ -22,6 +22,9 @@ Project history, newest first. Add a dated entry for every tag and every change 
 ### 13 Nov 2026 — Before/after timings under the integrity lock (#80)
 - **Changed** `CLAUDE.md` → Commands: before/after timings run old then new back to back, both under `flock /tmp/mulegraph-integrity.lock`, and report both with the load average.
 
+### 13 Nov 2026 — One-line docstrings checked by a test (#81)
+- **Added** `tests/test_docstrings.py`: every module, class and function docstring in `mulegraph/`, `tests/` and `scripts/` is one line, except an allowlist of the 34 multi-line ones that predate the rule (10, 23 and 1). A new multi-line docstring fails, and so does an allowlist entry that is gone or already one line. Checked once by hand both ways. No file under `mulegraph/` changes.
+
 ### 13 Nov 2026 — Union merge for the changelog (#77)
 - **Added** `.gitattributes` with `docs/changelog.md merge=union`, so two PRs that each add an entry under `## Unreleased` merge without a conflict and keep both entries. Checked by hand in a scratch clone. Union can drop the blank line between the two new headings, so tidy it after merging.
 
