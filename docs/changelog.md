@@ -1,8 +1,8 @@
 # Changelog
 
-Project history, newest first. Add a dated entry for every tag and every change that alters behaviour, requirements, or reproducibility. Each tag commits an MLflow CSV export under `report/exports/`.
+Project history, newest tag first. Every tag, and every change that alters behaviour, requirements, or reproducibility, gets a dated entry. Each tag commits an MLflow CSV export under `report/exports/`.
 
-A PR adds its entry as `docs/changelog.d/<issue>.md` (one `### <date> — <title> (#<issue>)` section), never here, so parallel PRs touch different files and merge on GitHub without a rebase. At tag time `uv run python scripts/gather_changelog.py` moves the entries under `## Unreleased`, highest issue first, and deletes the files.
+A PR writes its entry to `docs/changelog.d/<issue>.md` (one `### <date> — <title> (#<issue>)` section), never to this file, so parallel PRs touch different files and merge on GitHub without a rebase. To tag: run `uv run python scripts/gather_changelog.py`, which moves the entries under `## Unreleased` ordered by issue number, highest first, and deletes their files; then rename `## Unreleased` to the version.
 
 ---
 

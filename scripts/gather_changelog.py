@@ -10,7 +10,7 @@ def gather(changelog: Path, fragments: Path) -> None:
     """Insert every fragment below the Unreleased heading, then delete the fragments (#89)."""
     files = list(fragments.glob("*.md"))
     if bad := [f.name for f in files if not f.stem.isdigit()]:
-        raise SystemExit(f"{bad}: name each fragment by its issue number (89.md) to order it.")
+        raise SystemExit(f"{bad}: name each entry file by its issue number (89.md) to order it.")
     files.sort(key=lambda f: int(f.stem), reverse=True)
     text = changelog.read_text()
     if HEADING not in text:

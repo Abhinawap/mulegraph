@@ -1,5 +1,5 @@
 ---
-description: Update project_status.md and changelog.md to match the working tree, then commit. Use when committing work that changes project state.
+description: Update project_status.md and write the docs/changelog.d/<issue>.md entry to match the working tree, then commit. Use when committing work that changes project state.
 disable-model-invocation: true
 argument-hint: [optional commit message hint]
 ---
@@ -16,13 +16,12 @@ Extra context from the user, if any: `$ARGUMENTS`
 
 - `git status --porcelain` and `git diff HEAD` (or `git diff --cached` if
   something is staged) to see what actually changed.
-- Read `docs/project_status.md` and the newest `docs/changelog.md` entries before writing.
+- Read `docs/project_status.md` and a few entries in `docs/changelog.d/` or `docs/changelog.md` before writing.
 
 ## 2. Write the changelog entry
 
 - Write the entry to `docs/changelog.d/<issue>.md`, not `docs/changelog.md`, as one
-  `### <date> — <title> (#<issue>)` section, so parallel PRs never touch the same
-  file. `scripts/gather_changelog.py` folds the entries in at tag time.
+  `### <date> — <title> (#<issue>)` section (see the `docs/changelog.md` header).
 - Start each bullet with **Added**, **Changed**, **Fixed**, **Decided** or **Tests**.
 - Describe the change and its effect, not the file list. Reference the
   requirement id (`PR-F2`, `D2`, …) where the change implements or affects one.
