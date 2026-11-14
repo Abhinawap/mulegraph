@@ -19,6 +19,9 @@ Project history, newest first. Add a dated entry for every tag and every change 
 ### 13 Nov 2026 — Note the xdist group for shared benchmark fixtures (#79)
 - **Changed** `CLAUDE.md` → Testing: a module-scoped fixture that runs a benchmark needs `pytestmark = pytest.mark.xdist_group("<module>")`, or `-n` spreads the module over workers and each reruns the shared runs.
 
+### 13 Nov 2026 — Before/after timings under the integrity lock (#80)
+- **Changed** `CLAUDE.md` → Commands: before/after timings run old then new back to back, both under `flock /tmp/mulegraph-integrity.lock`, and report both with the load average.
+
 ### 13 Nov 2026 — Union merge for the changelog (#77)
 - **Added** `.gitattributes` with `docs/changelog.md merge=union`, so two PRs that each add an entry under `## Unreleased` merge without a conflict and keep both entries. Checked by hand in a scratch clone. Union can drop the blank line between the two new headings, so tidy it after merging.
 

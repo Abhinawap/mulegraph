@@ -112,6 +112,7 @@ uv run pytest -m "not integrity" --cov=mulegraph
 flock /tmp/mulegraph-integrity.lock uv run pytest -m integrity -n 3  # planted-bug rows, one run per machine
 # ...append --rows-for $(git diff --name-only --no-renames <base>) to run only the rows a diff needs
 uv run python scripts/dump_outputs.py before/   # refactor check: dump on the branch too, diff -r
+# before/after timing: old then new back to back, both under flock /tmp/mulegraph-integrity.lock; report both with the load average
 
 # Tracking
 uv run mlflow ui --backend-store-uri sqlite:///mlruns/mlflow.db
