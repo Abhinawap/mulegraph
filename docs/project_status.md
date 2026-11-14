@@ -13,7 +13,7 @@
 - [x] The health check flagged every AMLworld test day with its two-day reference. `reference: [0, 7]` fixes that on days 8 and 9 and still flags day 10 (changelog, 21 Sep 2026); the window was chosen after seeing those days, so it is a sensitivity check, not a held-out result.
 - [x] README leads with `mulegraph score` (21 Sep 2026).
 - [x] Static HTML report per scored batch (21 Sep 2026).
-- [x] Planted-bug rows for every threshold use in `pipeline.py`, drift included: 39 rows in `tests/test_integrity_mutants.py`, in their own CI job (7 Nov 2026); the score path's five, 44 in all (13 Nov 2026); the score report page's three and the alert-rate detector's two, 49 (13 Nov 2026).
+- [x] Planted-bug rows for every threshold use in `pipeline.py`, drift included: 39 rows in `tests/test_integrity_mutants.py`, in their own CI job (7 Nov 2026); the score path's five, 44 in all (13 Nov 2026); the score report page's three and the alert-rate detector's two, 49 (13 Nov 2026); one per threshold-bearing output sink and the CLI's drift flags, with a check that every output of a listed kind is planted or excused, 62 (#70, 14 Nov 2026).
 - [x] Guard the score path's `score_batches(threshold=...)` and alert-queue cut end to end in `tests/test_score.py`, and plant all five score-path threshold sites as rows (#59, 13 Nov 2026).
 - [x] Hero figure of a laundering subgraph for the README (13 Nov 2026).
 - [ ] A screenshot of the score report for the README. Optional polish; needs a headless browser.
