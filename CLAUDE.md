@@ -142,7 +142,7 @@ Required unit tests (NFR-2):
 
 Keep this file short — it loads into every session. Details belong in `docs/`.
 
-Update it when a design decision changes in `docs/design.md`, the package layout changes, or a command changes. Update `docs/project_status.md` and `docs/changelog.md` alongside code at every major addition.
+Update it when a design decision changes in `docs/design.md`, the package layout changes, or a command changes. Update `docs/project_status.md` alongside code at every major addition, and add the changelog entry as `docs/changelog.d/<issue>.md`, not in `docs/changelog.md` (parallel PRs then never conflict); `scripts/gather_changelog.py` folds the entries in at tag time.
 
 ## graphify
 

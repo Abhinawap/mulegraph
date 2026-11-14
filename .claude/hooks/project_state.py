@@ -102,8 +102,8 @@ def build_context() -> str:
         lines.append(f"Uncommitted changes: {len(dirty.splitlines())} path(s)")
 
     lines.append(
-        "Reminder: when work completes, update docs/project_status.md and "
-        "docs/changelog.md alongside the code."
+        "Reminder: when work completes, update docs/project_status.md and add "
+        "docs/changelog.d/<issue>.md alongside the code."
     )
     return "Project state (from docs/project_status.md):\n" + "\n".join(
         f"  {line}" for line in lines
