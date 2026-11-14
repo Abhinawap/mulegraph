@@ -56,13 +56,11 @@ def _outputs(alerts: Path, health: Path) -> tuple[pd.DataFrame, dict[str, Any]]:
     return pd.read_csv(alerts), json.loads(health.read_text())
 
 
-def test_queue_is_ranked_and_cut_at_the_validation_threshold(score_cfg: ScoreConfig) -> None:
-    """PR-E4: the queue is cut at the threshold fit() picks on validation; alerts sit above it."""
-    from mulegraph.drift.detectors import alert_shift
+def _honest_fit(score_cfg: ScoreConfig) -> tuple[Any, Any, Any]:
+    """``(data, feats, fitted)`` built outside run_score, fitted() threshold checked (PR-E4)."""
     from mulegraph.eval.threshold import choose_threshold
     from mulegraph.features.builder import build_features
     from mulegraph.features.select import select_features
-    from mulegraph.models.xgb import XGBModel
     from mulegraph.splits.builder import build_split
     from mulegraph.util import Paths
 
@@ -72,17 +70,35 @@ def test_queue_is_ranked_and_cut_at_the_validation_threshold(score_cfg: ScoreCon
     feats = select_features(data, build_features(data, score_cfg.features, cache_dir), "base_gfp")
     split = build_split(data, score_cfg.split.regimes[0], cache_dir)
     fitted = pipeline.fit(data, feats, [split], score_cfg.model, 0, "cpu")
-    assert fitted.threshold == choose_threshold(fitted.val.y, fitted.val.proba)[0]
+    assert (fitted.threshold, fitted.val_f1) == choose_threshold(fitted.val.y, fitted.val.proba)
+    return data, feats, fitted
+
+
+def test_queue_is_ranked_and_cut_at_the_validation_threshold(score_cfg: ScoreConfig) -> None:
+    """PR-E4: the queue is cut at the threshold fit() picks on validation; alerts sit above it."""
+    from mulegraph.drift.detectors import alert_shift
+    from mulegraph.eval.threshold import choose_threshold
+    from mulegraph.models.xgb import XGBModel
+
+    data, feats, fitted = _honest_fit(score_cfg)
 
     # Two batch-10 units score exactly at the cut and one float32 below it, so any other cut
     # moves the queue whatever the data. Batch 10 is a test batch: the val-chosen cut can't move.
     today = np.flatnonzero(data.batch_id == BATCH)
     at, below = np.float32(fitted.threshold), np.nextafter(np.float32(fitted.threshold), -np.inf)
     original = XGBModel.predict_proba
+    # Ten licit batch-10 units pinned between the val cut and the test-searched one, so the
+    # alert-rate flag, and with it the CLI's exit status, moves with the cut (checked below).
+    lo, hi = sorted((fitted.threshold, choose_threshold(fitted.test.y, fitted.test.proba)[0]))
+    raw = original(fitted.model, data, feats, today)
+    licit = today[2:][(data.y[today[2:]] == 0) & (raw[2:] < lo)][:10]
+    assert licit.size == 10
+    between = np.float32((lo + hi) / 2)
 
     def pinned(self: XGBModel, data: Any, feats: Any, idx: np.ndarray) -> np.ndarray:
         proba = original(self, data, feats, idx)
         proba[idx == today[0]], proba[idx == today[1]] = at, below
+        proba[np.isin(idx, licit)] = between
         return proba
 
     want = score_cfg.model_dump()  # the run must not rewrite what the test reads
@@ -90,7 +106,7 @@ def test_queue_is_ranked_and_cut_at_the_validation_threshold(score_cfg: ScoreCon
         mock.patch.object(XGBModel, "predict_proba", pinned),
         mock.patch.object(pipeline, "score_batches", wraps=pipeline.score_batches) as detect,
     ):
-        alerts_path, health_path, page_path, _ = pipeline.run_score(score_cfg)
+        alerts_path, health_path, page_path, flagged = pipeline.run_score(score_cfg)
         alerts, health = _outputs(alerts_path, health_path)
     assert score_cfg.model_dump() == want, "the run rewrote its config"
     assert health["threshold"] == fitted.threshold
@@ -113,6 +129,11 @@ def test_queue_is_ranked_and_cut_at_the_validation_threshold(score_cfg: ScoreCon
     )
     assert {"detector": "alert", "score": score, "flag_at": flag_at} in health["detectors"]
     assert ("alert" in health["flagged"]) == (score > flag_at)
+    assert flagged == health["flagged"]  # what the CLI exits 3 on
+    # ...and a threshold searched on this run's test rows would flip that flag.
+    bad = choose_threshold(fitted.test.y, pinned(fitted.model, data, feats, fitted.test.idx))[0]
+    bad_at = max(alert_shift(p_ref[b_ref != b], p_ref[b_ref == b], bad) for b in np.unique(b_ref))
+    assert (alert_shift(p_ref, s, bad) > bad_at) != (score > flag_at), "the flag no longer moves"
     yes = "yes" if score > flag_at else "no"
     assert f"<td>{score:.3f}</td><td>{flag_at:.3f}</td><td>{yes}</td></tr>" in page
     assert f"Top {min(TOP_ALERTS, ranked.size)} of {ranked.size:,}, ranked" in page
@@ -129,7 +150,9 @@ def test_queue_is_ranked_and_cut_at_the_validation_threshold(score_cfg: ScoreCon
     assert alerts["rank"].tolist() == list(range(1, len(alerts) + 1))
     assert (data.batch_id[alerts["unit"]] == BATCH).all()
     assert alerts["top_features"].str.count(";").eq(2).all()
-    assert health["status"] in {"drift_flagged", "no_drift_flagged"}
+    # conf, which never reads the threshold, flags here, so a test-searched one cannot move status.
+    assert "conf" in health["flagged"]
+    assert health["status"] == ("drift_flagged" if health["flagged"] else "no_drift_flagged")
     assert health["units_scored"] == int((data.batch_id == BATCH).sum())
 
 
@@ -137,6 +160,9 @@ def test_a_second_batch_reuses_the_deployed_model(
     score_cfg: ScoreConfig, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """One fit per definition: the next day is scored by the same model at the same threshold."""
+    # The validation optimum from a fit run_score never touches, so a corrupted cache shows.
+    honest = _honest_fit(score_cfg)[2]
+    want = honest.threshold
     fits: list[int] = []
     real = pipeline.fit
 
@@ -149,8 +175,10 @@ def test_a_second_batch_reuses_the_deployed_model(
     _, second = _outputs(*pipeline.run_score(ScoreConfig.model_validate(_raw(batch=11)))[:2])
 
     assert len(fits) == 1
-    assert first["threshold"] == second["threshold"]
+    assert first["threshold"] == second["threshold"] == want
     assert first["model_fit"] == second["model_fit"]
+    assert second["model_fit"]["threshold"] == want
+    assert second["model_fit"]["val_f1"] == honest.val_f1
 
     # Any change to the definition is a new model, never a silent cache hit.
     changed = _raw(model={"name": "xgb", "features": "base_gfp", "params": {"n_estimators": 21}})

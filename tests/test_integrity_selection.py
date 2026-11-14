@@ -9,7 +9,7 @@ from pathlib import Path
 
 import pytest
 
-from tests.test_integrity_mutants import MUTANTS
+from tests.test_integrity_mutants import HONEST, MUTANTS
 
 MODULE = "tests/test_integrity_mutants.py::"
 CONTROLS = {
@@ -36,6 +36,11 @@ def test_a_guard_file_selects_its_rows_and_the_controls(repo_root: Path, path: s
     score = {m.name for m in MUTANTS if any(t.startswith("tests/test_score.py::") for t in m.tests)}
     assert score
     rows = {MODULE + f"test_planting_the_bug_fails_its_guard[{n}]" for n in score}
+    # ...and the honest-F1 control of each such row that has one.
+    rows |= {
+        MODULE + f"test_a_recomputed_f1_at_the_honest_threshold_passes[{n}]"
+        for n in score & HONEST.keys()
+    }
     assert _collected(repo_root, "--rows-for", path) == rows | CONTROLS
 
 

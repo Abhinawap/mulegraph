@@ -22,11 +22,16 @@ PR curve and never on test. Any path where test labels or test scores reach
 threshold selection is fatal to the result, not a style issue.
 
 List every place the threshold, or a number computed from it, reaches an
-output: an MLflow metric, a CSV, a figure, a detector argument. For each, name
-its row in `tests/test_integrity_mutants.py`, which plants a threshold chosen
-on test rows there and requires its guard test to go red. A place with no row
-is a finding, even when the code there is correct today; so is an `UNPLANTED`
-reason that does not hold. A row's pass is the plant's evidence: plant by hand
+output: an MLflow metric, a CSV, a figure, a detector argument. Start from
+`test_every_output_sink_is_planted_or_excused`, which already requires every
+output of a listed kind in `pipeline.py` (`SINK_PREFIXES`, `SINK_METHODS`, a
+`run_*` return value) to sit under a row's site or carry an `UNSUNK` reason.
+Check the reasons, any output kind the two constants miss, and any new
+argument inside an output a row already plants; then walk back from each sink
+to the threshold. For each, name its row in `tests/test_integrity_mutants.py`,
+which plants a threshold chosen on test rows there and requires its guard test
+to go red. A place with no row is a finding, even when the code there is
+correct today; so is an `UNPLANTED` or `UNSUNK` reason that does not hold. A row's pass is the plant's evidence: plant by hand
 (with that file's `_copy`, `_plant` and `_run_pytest`) only a candidate row
 you are proposing, never one that already exists. Report each candidate as a
 row (site, broken replacement, must-fail test node) for the implementer to add.
