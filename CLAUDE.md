@@ -142,7 +142,7 @@ Required unit tests (NFR-2):
 
 Keep this file short — it loads into every session. Details belong in `docs/`.
 
-Update it when a design decision changes in `docs/design.md`, the package layout changes, or a command changes. Update `docs/project_status.md` and `docs/changelog.md` alongside code at every major addition.
+Update it when a design decision changes in `docs/design.md`, the package layout changes, or a command changes. Update `docs/project_status.md` alongside code at every major addition, and write the changelog entry to `docs/changelog.d/<issue>.md` (see the `docs/changelog.md` header).
 
 ## graphify
 
