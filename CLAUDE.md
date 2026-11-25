@@ -80,7 +80,7 @@ All code is written under the **ponytail** skill (`/ponytail`, full level). Befo
 - **No scaffolding for later.** No accepted-but-ignored config fields, no unreachable branches kept "as a home" for future work.
 - **Docstrings are one line** plus the requirement id. Rationale lives in `docs/design.md`, `docs/project_status.md` → *Verified method notes*, or `docs/methods.md`.
 - **Integrity overrides ponytail.** Never simplify away leakage assertions, threshold-on-validation, causality guards, shape/dtype validation at type boundaries, or an error message that says why.
-- Run `/ponytail-review` on the diff before committing.
+- Run `/ponytail-review` on the diff before committing, and before the first audit snapshot when the change needs the `integrity-auditor` gate.
 
 ## Repository Etiquette
 
