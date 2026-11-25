@@ -95,7 +95,10 @@ def build_context() -> str:
         busy = [n for n in ("MERGE_HEAD", "rebase-merge", "rebase-apply") if (gitdir / n).exists()]
         if busy or branch in merged:
             why = f"{'/'.join(busy)} in progress" if busy else "branch merged"
-            lines.append(f"Stale worktree: {path} [{branch or 'detached'}] ({why})")
+            lines.append(
+                f"Stale worktree: {path} [{branch or 'detached'}] ({why}); "
+                "new work starts in a session opened from the main checkout."
+            )
 
     dirty = git("status", "--porcelain")
     if dirty:
