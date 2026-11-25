@@ -23,6 +23,7 @@ from mulegraph import pipeline
 from mulegraph.cli import EXIT_DRIFT, app
 from mulegraph.config import ScoreConfig
 from mulegraph.report.html import TOP_ALERTS, write_score_report
+from mulegraph.types import FeatureMatrix, GraphDataset
 
 BATCH = 10
 
@@ -56,8 +57,8 @@ def _outputs(alerts: Path, health: Path) -> tuple[pd.DataFrame, dict[str, Any]]:
     return pd.read_csv(alerts), json.loads(health.read_text())
 
 
-def _honest_fit(score_cfg: ScoreConfig) -> tuple[Any, Any, Any]:
-    """``(data, feats, fitted)`` built outside run_score, fitted() threshold checked (PR-E4)."""
+def _honest_fit(score_cfg: ScoreConfig) -> tuple[GraphDataset, FeatureMatrix, pipeline.Fitted]:
+    """``(data, feats, fitted)`` built outside run_score, pipeline.fit threshold checked (PR-E4)."""
     from mulegraph.eval.threshold import choose_threshold
     from mulegraph.features.builder import build_features
     from mulegraph.features.select import select_features
@@ -154,6 +155,46 @@ def test_queue_is_ranked_and_cut_at_the_validation_threshold(score_cfg: ScoreCon
     assert "conf" in health["flagged"]
     assert health["status"] == ("drift_flagged" if health["flagged"] else "no_drift_flagged")
     assert health["units_scored"] == int((data.batch_id == BATCH).sum())
+
+
+def test_status_follows_the_alert_flag_at_the_validation_threshold(tmp_data_dir: Path) -> None:
+    """With only the alert-rate detector, the status is the flag at the validation cut (PR-E4)."""
+    from mulegraph.drift.detectors import alert_shift
+    from mulegraph.eval.threshold import choose_threshold
+    from mulegraph.models.xgb import XGBModel
+
+    cfg = ScoreConfig.model_validate(_raw(health={"calibrate": True, "detectors": ["alert"]}))
+    want = cfg.model_dump()  # the run must not rewrite what the test reads
+    data, feats, fitted = _honest_fit(cfg)
+    today = np.flatnonzero(data.batch_id == BATCH)
+    original = XGBModel.predict_proba
+    lo, hi = sorted((fitted.threshold, choose_threshold(fitted.test.y, fitted.test.proba)[0]))
+    raw = original(fitted.model, data, feats, today)
+    licit = today[(data.y[today] == 0) & (raw < lo)][:10]
+    assert licit.size == 10
+
+    def pinned(self: XGBModel, data: Any, feats: Any, idx: np.ndarray) -> np.ndarray:
+        proba = original(self, data, feats, idx)
+        proba[np.isin(idx, licit)] = np.float32((lo + hi) / 2)
+        return proba
+
+    with mock.patch.object(XGBModel, "predict_proba", pinned):
+        _, health_path, _, _ = pipeline.run_score(cfg)
+    assert cfg.model_dump() == want, "the run rewrote its config"
+    health = json.loads(health_path.read_text())
+    ref = np.flatnonzero(np.isin(data.batch_id, cfg.split.regimes[0].val))
+    p_ref, b_ref = pinned(fitted.model, data, feats, ref), data.batch_id[ref]
+    s = pinned(fitted.model, data, feats, today)
+
+    def flag(thr: float) -> bool:
+        flag_at = max(
+            alert_shift(p_ref[b_ref != b], p_ref[b_ref == b], thr) for b in np.unique(b_ref)
+        )
+        return alert_shift(p_ref, s, thr) > flag_at
+
+    bad = choose_threshold(fitted.test.y, pinned(fitted.model, data, feats, fitted.test.idx))[0]
+    assert flag(fitted.threshold) != flag(bad), "the status no longer moves with the cut"
+    assert health["status"] == ("drift_flagged" if flag(fitted.threshold) else "no_drift_flagged")
 
 
 def test_a_second_batch_reuses_the_deployed_model(

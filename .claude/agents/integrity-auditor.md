@@ -25,9 +25,15 @@ List every place the threshold, or a number computed from it, reaches an
 output: an MLflow metric, a CSV, a figure, a detector argument. Start from
 `test_every_output_sink_is_planted_or_excused`, which already requires every
 output of a listed kind in `pipeline.py` (`SINK_PREFIXES`, `SINK_METHODS`, a
-`run_*` return value) to sit under a row's site or carry an `UNSUNK` reason.
-Check the reasons, any output kind the two constants miss, and any new
-argument inside an output a row already plants; then walk back from each sink
+`run_*` return value) to sit under a row's site or carry an `UNSUNK` reason,
+and each entry of a dict literal passed straight into a planted output, or bound
+to a name the same function passes to an output, to have a row's site over its
+value or a reason keyed `function: name[key] = value`. Check the reasons, any
+output kind the two constants miss, any entry planted only because a row's site
+for a neighbouring entry overlaps its value and leaves it unchanged, any
+value a site covers only in part, and any value that reaches a planted
+output by another route (a non-dict argument, a dict nested inside an argument or
+built in another function, a key set after the literal); then walk back from each sink
 to the threshold. For each, name its row in `tests/test_integrity_mutants.py`,
 which plants a threshold chosen on test rows there and requires its guard test
 to go red. A place with no row is a finding, even when the code there is

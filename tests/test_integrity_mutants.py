@@ -28,6 +28,7 @@ DRIFT_E2E = (
 )
 SCORE_E2E = "tests/test_score.py::test_queue_is_ranked_and_cut_at_the_validation_threshold"
 REUSE = "tests/test_score.py::test_a_second_batch_reuses_the_deployed_model"
+STATUS_E2E = "tests/test_score.py::test_status_follows_the_alert_flag_at_the_validation_threshold"
 #: The threshold searched on the test rows in scope, which no guarded site may use.
 ON_TEST = "choose_threshold(test.y, test.proba)[0]"
 #: The same, where the test rows in scope are a Fitted's.
@@ -632,10 +633,10 @@ MUTANTS = [
     Mutant(
         "deployed model's cached val_f1 at a test-searched threshold",
         "mulegraph/pipeline.py",
-        '"val_f1": fitted.val_f1, "commit": commit',
+        '"val_f1": fitted.val_f1, "commit"',
         '"val_f1": '
         + F1_AT.format(y="fitted.val.y", p="fitted.val.proba", thr=ON_FITTED_TEST)
-        + ', "commit": commit',
+        + ', "commit"',
         (REUSE,),
     ),
     Mutant(
@@ -644,6 +645,37 @@ MUTANTS = [
         '"model_fit": fit_meta,',
         f'"model_fit": {{**fit_meta, "threshold": {ON_SPLIT_TEST}}},',
         (REUSE,),
+    ),
+    # From #95: dict entries that carry a threshold-derived value and had no row of their own.
+    Mutant(
+        "health file's status from a test-searched threshold",
+        "mulegraph/pipeline.py",
+        '"status": "drift_flagged" if flagged else "no_drift_flagged",',
+        f'"status": "drift_flagged" if {FLAGS_AT_TEST} else "no_drift_flagged",',
+        (STATUS_E2E,),
+    ),
+    Mutant(
+        "report's alert count at a test-searched threshold",
+        "mulegraph/pipeline.py",
+        '"alerts": int(alerted.size),',
+        f'"alerts": int((scores >= {ON_SPLIT_TEST}).sum()),',
+        (SCORE_E2E,),
+    ),
+    Mutant(
+        "logged test_* metrics at a test-searched threshold",
+        "mulegraph/pipeline.py",
+        "**scored,",
+        f'**scored | {{"test_f1": compute_metrics(test.y, test.proba, {ON_TEST}, ["f1"])["f1"]}},',
+        (LOGGED_F1,),
+    ),
+    Mutant(
+        "logged diag_* entries at a test-searched threshold",
+        "mulegraph/pipeline.py",
+        "**diagnostics,",
+        f"**diagnostics | {{f'diag_{{k}}': v for k, v in"
+        f' compute_metrics(test.y, test.proba, {ON_TEST}, ["f1"]).items()'
+        " if f'diag_{k}' in diagnostics},",
+        (LOGGED_F1,),
     ),
 ]
 
@@ -661,7 +693,11 @@ UNPLANTED = {
 
 
 #: Every output of pipeline.py that no row plants, with why no threshold-derived value reaches
-#: it (``function: source`` as ``ast.unparse`` prints it: reason).
+#: it (``function: source`` as ``ast.unparse`` prints it: reason). A dict entry is
+#: ``function: name[key] = value``, or ``function: name[**value]`` for a splat. A few hold for
+#: another reason: the value is tested where it is first written (``run_benchmark:
+#: write_results_table(...)``, ``run_drift: mlflow.log_artifact(str(artifact))``, ``run_smoke``'s
+#: return), not because no threshold-derived value reaches it.
 UNSUNK = {
     "_log_predictions: frame.to_parquet(path, index=False)": (
         "scored rows only (idx, proba, y, time, part), from which the guards re-derive thresholds"
@@ -701,6 +737,27 @@ UNSUNK = {
         "passes names, paths and the parent run id; the table reads the child runs' metrics,"
         " planted where they are logged"
     ),
+    "_log_child: mlflow.log_metrics[**{} if info.val_pr_auc is None else {'val_pr_auc':"
+    " info.val_pr_auc}]": "validation PR-AUC ranks scores and takes no threshold",
+    "_log_child: mlflow.log_metrics[**{} if info.best_iteration is None else {'best_iteration':"
+    " info.best_iteration}]": "the booster's early-stopping round, fixed before any threshold",
+    "_deployed_model: meta[commit] = commit": "the fitting commit's SHA",
+    "_deployed_model: meta[**definition]": (
+        "dataset, feature, split, model, seed, device and library versions, set before the fit"
+    ),
+    "_log_child: mlflow.log_metrics[fit_seconds] = info.seconds": "wall-clock seconds of the fit",
+    "run_score: report[batch] = cfg.batch": "the config's batch id",
+    "run_score: report[reference_batches] = [int(ref_batches[0]), int(ref_batches[-1])]": (
+        "the reference window's first and last batch ids"
+    ),
+    "run_score: report[units_scored] = int(today.sum())": (
+        "the size of today's batch, counted before any cut"
+    ),
+    "run_score: report[commit] = commit": "the scoring commit's SHA",
+    "run_score: report[note] = \"no flag is not an all-clear: on Elliptic's t43 shutdown F1 fell"
+    ' to 0.02 while no detector held a flag for two batches (docs/methods.md §12.4-12.5)"': (
+        "a constant string"
+    ),
     "run_drift: return lead_path": "a path, its file planted where it is written",
     "run_smoke: return (table, *_smoke_score(cfg))": (
         "paths from run_benchmark and run_score, each file planted where it is written"
@@ -714,14 +771,23 @@ SINK_METHODS = {"to_csv", "to_parquet", "write_text", "save", "savefig"}
 SINK_PREFIXES = ("mulegraph.report.", "mlflow.log_", "mlflow.set_tag")
 
 
+def _planted_sites(text: str) -> list[tuple[int, int]]:
+    """Byte spans in pipeline.py ``text`` of each row's site that plants a bug there."""
+    data = text.encode()
+    # A row that keeps its site verbatim and only inserts code beside it plants nothing there.
+    sites = [
+        m.site.encode()
+        for m in MUTANTS
+        if m.file == "mulegraph/pipeline.py" and m.site in text and m.site not in m.broken
+    ]
+    return [(data.index(s), data.index(s) + len(s)) for s in sites]
+
+
 def _planted_lines(text: str) -> set[int]:
     """Line numbers of pipeline.py ``text`` that some row's site plants a bug on."""
-    planted = set()
-    for m in MUTANTS:
-        # A row that keeps its site verbatim and only inserts code beside it plants nothing there.
-        if m.file == "mulegraph/pipeline.py" and m.site in text and m.site not in m.broken:
-            start = text[: text.index(m.site)].count("\n") + 1
-            planted.update(range(start, start + m.site.count("\n") + 1))
+    data, planted = text.encode(), set()
+    for lo, hi in _planted_sites(text):
+        planted.update(range(data[:lo].count(b"\n") + 1, data[:hi].count(b"\n") + 2))
     return planted
 
 
@@ -743,9 +809,19 @@ def _imports(tree: ast.Module) -> dict[str, str]:
 
 
 def _unsunk(text: str) -> list[str]:
-    """``function: source`` of each output in pipeline.py ``text`` that no row's site overlaps."""
-    tree = ast.parse(text)
-    bound, planted = _imports(tree), _planted_lines(text)
+    """``function: source`` of each output, and dict entry reaching one, no row's site overlaps."""
+    tree, data = ast.parse(text), text.encode()
+    bound, sites = _imports(tree), _planted_sites(text)
+    starts = [0]
+    for line in data.split(b"\n"):
+        starts.append(starts[-1] + len(line) + 1)
+
+    def span(n: ast.AST) -> tuple[int, int]:
+        # col_offset counts UTF-8 bytes, so spans are byte offsets into ``data``.
+        return starts[n.lineno - 1] + n.col_offset, starts[n.end_lineno - 1] + n.end_col_offset
+
+    def planted(lo: int, hi: int) -> bool:
+        return any(lo < b and a < hi for a, b in sites)
 
     def sink(node: ast.AST | None) -> bool:
         if not isinstance(node, ast.Call):
@@ -762,13 +838,47 @@ def _unsunk(text: str) -> list[str]:
         if sink(n)
         or (isinstance(n, ast.Return) and owner[n].startswith("run_") and not sink(n.value))
     ]
-    # ponytail: planted per output, not per argument, so a new key inside an already-planted
-    # log_metrics slips through; pin the logged key set in its guard if that ever matters.
-    return [
-        f"{owner.get(n, '<module>')}: {ast.unparse(n)}"
-        for n in outputs
-        if not planted & set(range(n.lineno, n.end_lineno + 1))
+    left = [
+        f"{owner.get(n, '<module>')}: {ast.unparse(n)}" for n in outputs if not planted(*span(n))
     ]
+
+    # Dicts scanned entry by entry: passed straight into a planted sink, or bound by name in a
+    # function that passes the name to a sink.
+    scanned: dict[ast.Dict, str] = {}
+    for n in outputs:
+        if isinstance(n, ast.Call) and planted(*span(n)):
+            args = [*n.args, *(k.value for k in n.keywords)]
+            scanned.update({a: ast.unparse(n.func) for a in args if isinstance(a, ast.Dict)})
+    for f in tree.body:
+        if not isinstance(f, ast.FunctionDef):
+            continue
+        sunk = {
+            x.id
+            for c in ast.walk(f)
+            if sink(c)
+            for a in (*c.args, *(k.value for k in c.keywords))
+            for x in ast.walk(a)
+            if isinstance(x, ast.Name)
+        }
+        for a in ast.walk(f):
+            if isinstance(a, ast.Assign | ast.AnnAssign) and isinstance(a.value, ast.Dict):
+                targets = a.targets if isinstance(a, ast.Assign) else [a.target]
+                for t in targets:
+                    if isinstance(t, ast.Name) and t.id in sunk:
+                        scanned[a.value] = t.id
+    for d, name in scanned.items():
+        for key, value in zip(d.keys, d.values, strict=True):
+            # A site over the key alone plants nothing the entry writes.
+            if planted(*span(value)):
+                continue
+            # The value is in the key, so an excused entry whose value changes needs a new reason.
+            if key is None:
+                entry = f"[**{ast.unparse(value)}]"
+            else:
+                k = key.value if isinstance(key, ast.Constant) else ast.unparse(key)
+                entry = f"[{k}] = {ast.unparse(value)}"
+            left.append(f"{owner[d]}: {name}{entry}")
+    return left
 
 
 def _threshold_lines(path: Path) -> dict[int, str]:
@@ -870,6 +980,45 @@ def test_a_new_output_is_seen_by_the_sink_scan(repo_root: Path) -> None:
         "_new: figures.plot_x(frame)",
         "_new: mf.set_tag('t', 1)",
         "_new: mlflow.log_artifact(str(path))",
+    }
+
+
+def test_a_new_dict_entry_is_seen_by_the_sink_scan(repo_root: Path) -> None:
+    """Entries added to a dict a sink writes show: by name or straight in, split or one line."""
+    text = (repo_root / "mulegraph" / "pipeline.py").read_text()
+    before = _unsunk(text)
+
+    def added(old: str, new: str) -> set[str]:
+        assert text.count(old) == 1, old
+        return set(_unsunk(text.replace(old, new))) - set(before)
+
+    assert added(
+        '        "units_scored": int(today.sum()),\n', '        "cut_x2": threshold * 2,\n'
+    ) == {"run_score: report[cut_x2] = threshold * 2"}
+    # An annotated binding is scanned, and an excused entry's new value needs a new reason.
+    assert added(
+        '    report = {\n        "batch": cfg.batch,',
+        '    report: dict[str, Any] = {\n        "batch": int(alerted.size),',
+    ) == {"run_score: report[batch] = int(alerted.size)"}
+    # A site over the key alone does not plant the value.
+    assert added('"fit_seconds": info.seconds,', '"fit_seconds": fitted.threshold * 2,') == {
+        "_log_child: mlflow.log_metrics[fit_seconds] = fitted.threshold * 2"
+    }
+    assert added(
+        '"commit": commit, **definition}',
+        '"commit": commit, "cut_x2": threshold * 2, **definition}',
+    ) == {"_deployed_model: meta[cut_x2] = threshold * 2"}
+    assert added(
+        "                **scored,\n", "                **scored,\n                **extra,\n"
+    ) == {"_log_child: mlflow.log_metrics[**extra]"}
+    assert added(
+        '                "fit_seconds": info.seconds,\n',
+        '                "cut_x2": fitted.threshold * 2,\n',
+    ) == {"_log_child: mlflow.log_metrics[cut_x2] = fitted.threshold * 2"}
+    # A dict straight into an excused sink is one output, so only its whole-call key moves.
+    assert added('"seeds": list(cfg.seeds)})', '"seeds": list(cfg.seeds), "cut_x2": 1})') == {
+        "run_drift: mlflow.log_params({'dataset_version': data.meta.version,"
+        " 'seeds': list(cfg.seeds), 'cut_x2': 1})"
     }
 
 
