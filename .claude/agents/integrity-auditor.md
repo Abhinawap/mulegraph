@@ -48,12 +48,19 @@ Run the rows a diff needs with
 flock /tmp/mulegraph-integrity.lock uv run pytest -m integrity -n 3 --rows-for $(git diff --name-only --no-renames <base>)
 ```
 
-so a second session waits instead of both running out of memory. `--rows-for`
+so a second session waits instead of both running out of memory. The five meta-tests
+this section starts from carry no `integrity` mark, so `-m integrity` deselects
+them; run them with default markers:
+
+```bash
+uv run pytest tests/test_integrity_mutants.py
+```
+
+`--rows-for`
 (root `conftest.py`) keeps every row unless the list is non-empty and each
 path is under `docs/` or `.claude/agents/`, or is a top-level `tests/test_*.py`
 file other than `tests/test_integrity_mutants.py`; then it keeps only the rows whose `tests`
-name one of those files, plus `test_every_threshold_use_is_planted_or_excused`
-and `test_every_guard_passes_in_the_unplanted_copy`. CI runs every row on push.
+name one of those files, plus `test_every_guard_passes_in_the_unplanted_copy`. CI runs every row on push.
 
 In every round, for each gate, selector or guard the diff (or a delta round's
 fix diff) adds or changes, list every kind of input it accepts: empty,

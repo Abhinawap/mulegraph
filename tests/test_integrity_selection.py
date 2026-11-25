@@ -12,9 +12,16 @@ import pytest
 from tests.test_integrity_mutants import HONEST, MUTANTS
 
 MODULE = "tests/test_integrity_mutants.py::"
-CONTROLS = {
-    MODULE + "test_every_guard_passes_in_the_unplanted_copy",
-    MODULE + "test_every_threshold_use_is_planted_or_excused",
+CONTROLS = {MODULE + "test_every_guard_passes_in_the_unplanted_copy"}
+META = {
+    MODULE + n
+    for n in (
+        "test_every_threshold_use_is_planted_or_excused",
+        "test_every_output_sink_is_planted_or_excused",
+        "test_a_new_output_is_seen_by_the_sink_scan",
+        "test_a_new_dict_entry_is_seen_by_the_sink_scan",
+        "test_a_missing_site_fails_with_site_moved",
+    )
 }
 
 
@@ -47,6 +54,12 @@ def test_a_guard_file_selects_its_rows_and_the_controls(repo_root: Path, path: s
 def test_a_docs_only_diff_selects_only_the_controls(repo_root: Path) -> None:
     paths = ("docs/design.md", ".claude/agents/integrity-auditor.md")
     assert _collected(repo_root, "--rows-for", *paths, where=()) == CONTROLS
+
+
+def test_a_narrowed_run_keeps_the_unmarked_meta_tests(repo_root: Path) -> None:
+    """Under default markers a narrowed run still collects the five unmarked tests (NFR-2)."""
+    # The last -m wins; "not integrity" is the addopts default.
+    assert _collected(repo_root, "-m", "not integrity", "--rows-for", "docs/x.md") == META
 
 
 def test_no_guard_file_imports_another_test_file(repo_root: Path) -> None:
