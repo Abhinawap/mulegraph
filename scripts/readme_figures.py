@@ -78,7 +78,7 @@ def plot_alert_load(table: pd.DataFrame, paths: Paths) -> None:
 
 
 def plot_eval_gap(paths: Paths) -> None:
-    """Elliptic test F1, random vs temporal split, five-seed means without intervals (PR-E3)."""
+    """Elliptic test F1, random vs temporal split, five-seed means (NFR-1)."""
     results = pd.read_csv(paths.tables_dir() / "elliptic_mvp_results.csv")
     f1 = (
         results[results["metric"] == "test_f1"]
@@ -88,8 +88,8 @@ def plot_eval_gap(paths: Paths) -> None:
     y = np.arange(len(f1))[::-1]
     fig, ax = plt.subplots(figsize=(7, 2.9))
     ax.hlines(y, f1["temporal"], f1["random"], color="#d0d5db", lw=2, zorder=1)
-    ax.scatter(f1["random"], y, s=60, color="#9aa5b1", zorder=2, label="Random split (leaky)")
     ax.scatter(f1["temporal"], y, s=60, color="#1f5fa8", zorder=2, label="Temporal split (honest)")
+    ax.scatter(f1["random"], y, s=60, color="#9aa5b1", zorder=2, label="Random split (leaky)")
     ax.set_yticks(y, list(ELLIPTIC_ROWS.values()))
     ax.set_xlim(0.5, 1)
     ax.set_xlabel("F1, illicit transactions")

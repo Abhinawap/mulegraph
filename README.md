@@ -36,9 +36,9 @@ transactions: the largest connected group of laundering transactions with at mos
 - **How you test the model changes the answer more than which model you pick.** The score used
   here is F1, from 0 to 1, which rewards catching laundering and penalises false alarms. On the
   Bitcoin data, tested on a random shuffle, which lets the model see the future, every model scores
-  0.90–0.96.
-  Tested honestly, training on earlier weeks and scoring later ones, they score 0.56–0.78, and the
-  tree models match published results. The toolkit only reports the honest version as the headline.
+  0.90–0.96. Tested honestly, training on earlier weeks and scoring later ones, they score 0.56–0.78,
+  and the tree models match published results. The toolkit only reports the honest version as the
+  headline.
 - **When criminal behaviour changed, no label-free alarm warned in time.** After a dark market shut
   down (time step 43 of 49 in the Bitcoin data), every model's F1 fell to near zero. None of four
   drift detectors, which compare today's data with the training data without knowing which
