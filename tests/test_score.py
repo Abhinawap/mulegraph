@@ -78,6 +78,7 @@ def _honest_fit(score_cfg: ScoreConfig) -> tuple[GraphDataset, FeatureMatrix, pi
 def test_queue_is_ranked_and_cut_at_the_validation_threshold(score_cfg: ScoreConfig) -> None:
     """PR-E4: the queue is cut at the threshold fit() picks on validation; alerts sit above it."""
     from mulegraph.drift.detectors import alert_shift
+    from mulegraph.drift.monitor import DETECTORS, score_batches
     from mulegraph.eval.threshold import choose_threshold
     from mulegraph.models.xgb import XGBModel
 
@@ -103,15 +104,39 @@ def test_queue_is_ranked_and_cut_at_the_validation_threshold(score_cfg: ScoreCon
         return proba
 
     want = score_cfg.model_dump()  # the run must not rewrite what the test reads
+    # Every detector's score, flag level and flag, fixed before the run so nothing it does
+    # reaches them: a label-derived setting or scorer, by any route, moves the health file.
+    v0, v1 = score_cfg.reference or score_cfg.split.regimes[0].val
+    idx = np.flatnonzero((data.batch_id >= v0) & (data.batch_id <= v1) | (data.batch_id == BATCH))
+    honest = score_batches(
+        feats.values[idx],
+        pinned(fitted.model, data, feats, idx),
+        data.batch_id[idx],
+        np.arange(v0, v1 + 1),
+        ScoreConfig.model_validate(want).health,
+        threshold=fitted.threshold,
+    )
+    seen, real = [], pipeline.score_batches
+
+    def spy(*args: Any, **kwargs: Any) -> pd.DataFrame:
+        seen.append(args[4].model_copy(deep=True))  # at call time: the run could restore it after
+        return real(*args, **kwargs)
+
     with (
         mock.patch.object(XGBModel, "predict_proba", pinned),
-        mock.patch.object(pipeline, "score_batches", wraps=pipeline.score_batches) as detect,
+        mock.patch.object(pipeline, "score_batches", side_effect=spy) as detect,
     ):
         alerts_path, health_path, page_path, flagged = pipeline.run_score(score_cfg)
         alerts, health = _outputs(alerts_path, health_path)
     assert score_cfg.model_dump() == want, "the run rewrote its config"
     assert health["threshold"] == fitted.threshold
     assert detect.call_args.kwargs["threshold"] == fitted.threshold  # the health check (PR-R2)
+    assert seen == [ScoreConfig.model_validate(want).health]  # its settings, as it got them
+    got = [(d["detector"], d["score"], d["flag_at"]) for d in health["detectors"]]
+    assert got == list(
+        honest[["detector", "score", "threshold"]].itertuples(index=False, name=None)
+    )
+    assert health["flagged"] == honest.loc[honest["flagged"], "detector"].tolist()
     # The pinned unit also shows the threshold in the queue table, so match the labelled fact.
     shown = f"<dt>Alert threshold (chosen on validation)</dt><dd>{fitted.threshold:.4f}</dd>"
     page = page_path.read_text()
@@ -119,16 +144,18 @@ def test_queue_is_ranked_and_cut_at_the_validation_threshold(score_cfg: ScoreCon
     s = pinned(fitted.model, data, feats, today)
     order = np.argsort(-s, kind="stable")
     ranked = today[order][s[order] >= fitted.threshold]
-    assert f": {ranked.size:,} alerts from {today.size:,} units</h1>" in page
+    assert f"<title>Batch {BATCH} report</title>" in page
+    assert f"<h1>Batch {BATCH}: {ranked.size:,} alerts from {today.size:,} units</h1>" in page
     # The alert-rate score and its calibrated flag level both use the threshold (PR-R2 inputs).
-    ref = np.flatnonzero(np.isin(data.batch_id, score_cfg.split.regimes[0].val))
+    ref = np.flatnonzero((data.batch_id >= v0) & (data.batch_id <= v1))
     p_ref, b_ref = pinned(fitted.model, data, feats, ref), data.batch_id[ref]
     score = alert_shift(p_ref, s, fitted.threshold)
     flag_at = max(
         alert_shift(p_ref[b_ref != b], p_ref[b_ref == b], fitted.threshold)
         for b in np.unique(b_ref)
     )
-    assert {"detector": "alert", "score": score, "flag_at": flag_at} in health["detectors"]
+    words = {"compares": "model scores", "means": "how much the share of alerts has changed"}
+    assert {"detector": "alert", "score": score, "flag_at": flag_at, **words} in health["detectors"]
     assert ("alert" in health["flagged"]) == (score > flag_at)
     assert flagged == health["flagged"]  # what the CLI exits 3 on
     # ...and a threshold searched on this run's test rows would flip that flag.
@@ -137,6 +164,13 @@ def test_queue_is_ranked_and_cut_at_the_validation_threshold(score_cfg: ScoreCon
     assert (alert_shift(p_ref, s, bad) > bad_at) != (score > flag_at), "the flag no longer moves"
     yes = "yes" if score > flag_at else "no"
     assert f"<td>{score:.3f}</td><td>{flag_at:.3f}</td><td>{yes}</td></tr>" in page
+    body = page.split("<th>Flagged</th></tr>")[1].split("</table>")[0]
+    assert body == "".join(  # the page's whole detector table, in order
+        f"<tr><td>{d.detector}</td><td>{DETECTORS[d.detector].compares}</td>"
+        f"<td>{DETECTORS[d.detector].means}</td><td>{d.score:.3f}</td>"
+        f"<td>{d.threshold:.3f}</td><td>{'yes' if d.flagged else 'no'}</td></tr>"
+        for d in honest.itertuples(index=False)
+    )
     assert f"Top {min(TOP_ALERTS, ranked.size)} of {ranked.size:,}, ranked" in page
     queue = page.split("<h2>Alert queue</h2>")[1].split("<h2>Provenance</h2>")[0]
     rows = re.findall(r"<tr>\s*<td>\d+</td>\s*<td>[^<]*</td>\s*<td>([^<]*)</td>", queue)
@@ -340,7 +374,8 @@ def test_the_report_escapes_what_the_data_supplies_and_truncates_the_queue(tmp_p
     health = {
         "batch": 3, "flagged": [], "reference_batches": [0, 1], "units_scored": 40, "alerts": 30,
         "threshold": 0.9, "commit": "abc", "model_fit": fit, "note": "a <note>",
-        "detectors": [{"detector": "psi", "score": 0.1, "flag_at": 0.2}],
+        "detectors": [{"detector": "psi", "score": 0.1, "flag_at": 0.2, "compares": "features",
+                       "means": "a shift"}],
     }  # fmt: skip
     alerts = pd.DataFrame(
         {

@@ -24,7 +24,7 @@ from mulegraph.config import (
     load_config,
 )
 from mulegraph.data import load_dataset
-from mulegraph.drift.monitor import lead_time, score_batches
+from mulegraph.drift.monitor import DETECTORS, lead_time, score_batches
 from mulegraph.eval.curves import CURVE_METRICS, per_timestep
 from mulegraph.eval.event import event_windows, probe_auc
 from mulegraph.eval.metrics import EXTRA_KEYS, compute_metrics
@@ -429,17 +429,10 @@ def run_drift(cfg: DriftRunConfig, config_path: Path) -> Path:
                     proba,
                     batch,
                     ref_batches,
-                    detectors=cfg.drift.detectors,
-                    bins=cfg.drift.bins,
-                    psi_flag=cfg.drift.psi_flag,
-                    ks_alpha=cfg.drift.ks_alpha,
-                    ks_frac_flag=cfg.drift.ks_frac,
-                    conf_flag=cfg.drift.conf_flag,
-                    alert_flag=cfg.drift.alert_flag,
+                    cfg.drift,
                     # The validation-chosen threshold (PR-E4); the alert-rate detector counts
                     # units at or above it and never sees a label (PR-R2).
                     threshold=fitted.threshold,
-                    calibrate=cfg.drift.calibrate,
                 )
                 ref_f1 = float(per_timestep(fitted.val, fitted.threshold)["f1"].mean())
                 lead = lead_time(curve, table, ref_f1, cfg.drift.f1_drop, cfg.drift.drop_run)
@@ -557,21 +550,8 @@ def run_score(cfg: ScoreConfig) -> tuple[Path, Path, Path, list[str]]:
     if not today.any():
         raise ValueError(f"batch {cfg.batch} has no {data.task}s in {data.meta.dataset} to score")
     proba = model.predict_proba(data, feats, idx)
-    h = cfg.health
     health = score_batches(
-        feats.values[idx],
-        proba,
-        batch,
-        ref_batches,
-        detectors=h.detectors,
-        bins=h.bins,
-        psi_flag=h.psi_flag,
-        ks_alpha=h.ks_alpha,
-        ks_frac_flag=h.ks_frac,
-        conf_flag=h.conf_flag,
-        alert_flag=h.alert_flag,
-        threshold=threshold,
-        calibrate=h.calibrate,
+        feats.values[idx], proba, batch, ref_batches, cfg.health, threshold=threshold
     )
 
     units, scores = idx[today], proba[today]
@@ -607,7 +587,13 @@ def run_score(cfg: ScoreConfig) -> tuple[Path, Path, Path, list[str]]:
         "status": "drift_flagged" if flagged else "no_drift_flagged",
         "flagged": flagged,
         "detectors": [
-            {"detector": r.detector, "score": r.score, "flag_at": r.threshold}
+            {
+                "detector": r.detector,
+                "score": r.score,
+                "flag_at": r.threshold,
+                "compares": DETECTORS[r.detector].compares,
+                "means": DETECTORS[r.detector].means,
+            }
             for r in health.itertuples(index=False)
         ],
         "reference_batches": [int(ref_batches[0]), int(ref_batches[-1])],

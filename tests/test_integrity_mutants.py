@@ -39,19 +39,27 @@ ON_SPLIT_TEST = (
 #: wrapper on pipeline.score_batches does not count.
 FLAGS_AT_TEST = (
     '__import__("mulegraph.drift.monitor").drift.monitor.score_batches(feats.values[idx], proba,'
-    " batch, ref_batches, detectors=h.detectors, bins=h.bins, psi_flag=h.psi_flag,"
-    " ks_alpha=h.ks_alpha, ks_frac_flag=h.ks_frac, conf_flag=h.conf_flag,"
-    f" alert_flag=h.alert_flag, threshold={ON_SPLIT_TEST}, calibrate=h.calibrate)"
+    f" batch, ref_batches, cfg.health, threshold={ON_SPLIT_TEST})"
     '.query("flagged").detector.tolist()'
 )
-DETECTOR_ROW = '{"detector": r.detector, "score": r.score, "flag_at": r.threshold}'
-ALERT_AT = '__import__("mulegraph.drift.detectors").drift.detectors.alert_shift'
-HEALTH_SITE = "alert_flag=h.alert_flag,\n        threshold=threshold,"
+DETECTOR_ROW = """{
+                "detector": r.detector,
+                "score": r.score,
+                "flag_at": r.threshold,
+                "compares": DETECTORS[r.detector].compares,
+                "means": DETECTORS[r.detector].means,
+            }"""
+MONITOR = '__import__("mulegraph.drift.monitor").drift.monitor'
+DETECTORS_MOD = '__import__("mulegraph.drift.detectors").drift.detectors'
+#: The scored batch's KS share at a test-F1-derived alpha, from inside ``run_score``.
+KS_AT_TEST_F1 = (
+    f"{DETECTORS_MOD}.ks_frac(feats.values[idx][np.isin(batch, ref_batches)],"
+    f" feats.values[idx][today], {ON_SPLIT_TEST.replace('[0]', '[1]')} / 2)"
+)
+ALERT_AT = f"{DETECTORS_MOD}.alert_shift"
+HEALTH_SITE = "cfg.health, threshold=threshold"
 LEAD_SITE = "lead = lead_time(curve, table, ref_f1, cfg.drift.f1_drop, cfg.drift.drop_run)"
-SCORE_ARGS = """feats.values[scored_idx], proba, batch, ref_batches, detectors=cfg.drift.detectors,
-                    bins=cfg.drift.bins, psi_flag=cfg.drift.psi_flag, ks_alpha=cfg.drift.ks_alpha,
-                    ks_frac_flag=cfg.drift.ks_frac, conf_flag=cfg.drift.conf_flag,
-                    alert_flag=cfg.drift.alert_flag, calibrate=cfg.drift.calibrate"""
+SCORE_ARGS = "feats.values[scored_idx], proba, batch, ref_batches, cfg.drift"
 #: F1 of ``p >= thr`` as ``choose_threshold`` computes it: sklearn's f1_score can differ by an
 #: ulp, which would turn a val_f1 row red with nothing planted.
 _SK = '__import__("sklearn.metrics").metrics'
@@ -221,8 +229,8 @@ MUTANTS = [
     Mutant(
         "alert-rate detector at a test-searched threshold",
         "mulegraph/pipeline.py",
-        "threshold=fitted.threshold,\n                    calibrate",
-        f"threshold={ON_FITTED_TEST},\n                    calibrate",
+        "threshold=fitted.threshold,\n                )",
+        f"threshold={ON_FITTED_TEST},\n                )",
         (DRIFT_E2E,),
     ),
     Mutant(
@@ -338,8 +346,8 @@ MUTANTS = [
     Mutant(
         "alert flag level derived from test F1 (PR-R2)",
         "mulegraph/pipeline.py",
-        "alert_flag=cfg.drift.alert_flag,",
-        'alert_flag=float(curve["f1"].min()) / 100,',
+        "cfg.drift,\n",
+        'cfg.drift.model_copy(update={"alert_flag": float(curve["f1"].min()) / 100}),\n',
         (DRIFT_E2E,),
     ),
     Mutant(
@@ -453,7 +461,75 @@ MUTANTS = [
         "health check's alert-rate detector at a test-searched threshold (PR-R2)",
         "mulegraph/pipeline.py",
         HEALTH_SITE,
-        HEALTH_SITE.replace("threshold=threshold,", f"threshold={ON_SPLIT_TEST},"),
+        HEALTH_SITE.replace("threshold=threshold", f"threshold={ON_SPLIT_TEST}"),
+        (SCORE_E2E,),
+    ),
+    Mutant(
+        "health check's alert flag level derived from test F1 (PR-R2)",
+        "mulegraph/pipeline.py",
+        HEALTH_SITE,
+        'cfg.health.model_copy(update={"calibrate": False, "alert_flag": '
+        + ON_SPLIT_TEST.replace("[0]", "[1]")
+        + " / 100}), threshold=threshold",
+        (SCORE_E2E,),
+    ),
+    Mutant(
+        "health file written from a second health check at a test-F1 KS level (PR-R2)",
+        "mulegraph/pipeline.py",
+        HEALTH_SITE,
+        "cfg.health, threshold=threshold).pipe(lambda _h: "
+        f"{MONITOR}.score_batches("
+        "feats.values[idx], proba, batch, ref_batches, "
+        'cfg.health.model_copy(update={"ks_alpha": '
+        + ON_SPLIT_TEST.replace("[0]", "[1]")
+        + " / 2}), threshold=threshold)",
+        (SCORE_E2E,),
+    ),
+    Mutant(
+        "health check's KS scorer rebound at a test-F1 level for the call (PR-R2)",
+        "mulegraph/pipeline.py",
+        "    proba = model.predict_proba(data, feats, idx)\n",
+        "    proba = model.predict_proba(data, feats, idx)\n"
+        f"    _m = {MONITOR}\n"
+        "    _old = _m.DETECTORS\n"
+        '    _m.DETECTORS = {**_old, "ks": _old["ks"]._replace(score=lambda rx, cx, rp, cp, c, t,'
+        f" _a={ON_SPLIT_TEST.replace('[0]', '[1]')} / 2: {DETECTORS_MOD}.ks_frac(rx, cx, _a))}}\n",
+        (SCORE_E2E,),
+        also=(
+            (
+                "    units, scores = idx[today], proba[today]\n",
+                f"    {MONITOR}.DETECTORS = _old\n    units, scores = idx[today], proba[today]\n",
+            ),
+        ),
+    ),
+    Mutant(
+        "health check's KS level from test F1, set and restored around the call (PR-R2)",
+        "mulegraph/pipeline.py",
+        HEALTH_SITE,
+        '(object.__setattr__(cfg.health, "ks_alpha", '
+        + ON_SPLIT_TEST.replace("[0]", "[1]")
+        + " / 100) or cfg.health), threshold=threshold",
+        (SCORE_E2E,),
+        also=(
+            (
+                "    first, last = cfg.reference or regime.val\n",
+                "    _old_ks = cfg.health.ks_alpha\n"
+                "    first, last = cfg.reference or regime.val\n",
+            ),
+            (
+                "    units, scores = idx[today], proba[today]\n",
+                '    object.__setattr__(cfg.health, "ks_alpha", _old_ks)\n'
+                "    units, scores = idx[today], proba[today]\n",
+            ),
+        ),
+    ),
+    Mutant(
+        "health check's KS level derived from test F1 (PR-R2)",
+        "mulegraph/pipeline.py",
+        HEALTH_SITE,
+        'cfg.health.model_copy(update={"ks_alpha": '
+        + ON_SPLIT_TEST.replace("[0]", "[1]")
+        + " / 100}), threshold=threshold",
         (SCORE_E2E,),
     ),
     Mutant(
@@ -476,6 +552,44 @@ MUTANTS = [
         'page_path = write_score_report(tables_dir / f"{stem}_report.html", report, alerts)',
         'page_path = write_score_report(tables_dir / f"{stem}_report.html",'
         f' {{**report, "threshold": {ON_SPLIT_TEST}}}, alerts)',
+        (SCORE_E2E,),
+    ),
+    Mutant(
+        "report page's KS row at a test-F1 KS level (PR-R2)",
+        "mulegraph/pipeline.py",
+        'page_path = write_score_report(tables_dir / f"{stem}_report.html", report, alerts)',
+        'page_path = write_score_report(tables_dir / f"{stem}_report.html", {**report, "detectors":'
+        f' [{{**d, "score": {KS_AT_TEST_F1}}} if d["detector"] == "ks" else d'
+        ' for d in report["detectors"]]}, alerts)',
+        (SCORE_E2E,),
+    ),
+    Mutant(
+        "report page gains a second KS row at a test-F1 KS level (PR-R2)",
+        "mulegraph/pipeline.py",
+        'page_path = write_score_report(tables_dir / f"{stem}_report.html", report, alerts)',
+        'page_path = write_score_report(tables_dir / f"{stem}_report.html", {**report, "detectors":'
+        f' report["detectors"] + [{{**d, "score": {KS_AT_TEST_F1}}}'
+        ' for d in report["detectors"] if d["detector"] == "ks"]}, alerts)',
+        (SCORE_E2E,),
+    ),
+    Mutant(
+        "report page gains a second KS row, broken across lines, at a test-F1 KS level (PR-R2)",
+        "mulegraph/pipeline.py",
+        'page_path = write_score_report(tables_dir / f"{stem}_report.html", report, alerts)',
+        'page_path = write_score_report(tables_dir / f"{stem}_report.html", {**report, "detectors":'
+        ' report["detectors"] + [{**d, "compares": d["compares"] + "\\n",'
+        f' "score": {KS_AT_TEST_F1}}}'
+        ' for d in report["detectors"] if d["detector"] == "ks"]}, alerts)',
+        (SCORE_E2E,),
+    ),
+    Mutant(
+        "report page's batch field carries a KS table at a test-F1 KS level (PR-R2)",
+        "mulegraph/pipeline.py",
+        'page_path = write_score_report(tables_dir / f"{stem}_report.html", report, alerts)',
+        'page_path = write_score_report(tables_dir / f"{stem}_report.html", {**report, "batch":'
+        ' str(report["batch"]) + "<table><tr><td>ks</td><td>input features</td><td>x</td><td>"'
+        f' + format({KS_AT_TEST_F1}, ".3f")'
+        ' + "</td><td>0.100</td><td>yes</td></tr></table>"}, alerts)',
         (SCORE_E2E,),
     ),
     Mutant(
