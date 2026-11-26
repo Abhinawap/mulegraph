@@ -10,11 +10,8 @@ import pytest
 #: Paths whose change can matter to no planted row but those whose guards they hold (NFR-2).
 _ROWS = "test_integrity_mutants.py"
 _NARROWING = ("docs/", ".claude/agents/")
-#: The two integrity tests every narrowed run keeps.
-_CONTROLS = {
-    "test_every_guard_passes_in_the_unplanted_copy",
-    "test_every_threshold_use_is_planted_or_excused",
-}
+#: The integrity test every narrowed run keeps.
+_CONTROLS = {"test_every_guard_passes_in_the_unplanted_copy"}
 
 
 def pytest_addoption(parser: pytest.Parser) -> None:
@@ -44,7 +41,7 @@ def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item
         return
     keep, drop = [], []
     for item in items:
-        if item.path.name != _ROWS:
+        if item.path.name != _ROWS or not item.get_closest_marker("integrity"):
             keep.append(item)
             continue
         callspec = getattr(item, "callspec", None)

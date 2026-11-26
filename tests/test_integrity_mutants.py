@@ -14,8 +14,6 @@ from typing import NamedTuple
 
 import pytest
 
-pytestmark = pytest.mark.integrity
-
 PIPELINE = "tests/test_pipeline.py::"
 FIT_THRESHOLD = PIPELINE + "test_the_threshold_is_the_validation_optimum_applied_to_every_test_row"
 LOGGED_F1 = PIPELINE + "test_every_logged_f1_is_scored_at_its_runs_validation_optimum[tiny_config]"
@@ -956,6 +954,7 @@ def _run_pytest(root: Path, *args: str) -> subprocess.CompletedProcess[str]:
     )
 
 
+@pytest.mark.integrity
 def test_every_guard_passes_in_the_unplanted_copy(repo_root: Path, tmp_path: Path) -> None:
     """Control: the copy imports itself and its guards pass, so a row's failure is its bug."""
     root = _copy(repo_root, tmp_path)
@@ -1118,6 +1117,7 @@ HONEST = {
 }
 
 
+@pytest.mark.integrity
 @pytest.mark.parametrize("name", HONEST)
 def test_a_recomputed_f1_at_the_honest_threshold_passes(
     name: str, repo_root: Path, tmp_path: Path
@@ -1130,6 +1130,7 @@ def test_a_recomputed_f1_at_the_honest_threshold_passes(
     assert out.returncode == 0, out.stdout + out.stderr
 
 
+@pytest.mark.integrity
 @pytest.mark.parametrize("mutant", MUTANTS, ids=[m.name for m in MUTANTS])
 def test_planting_the_bug_fails_its_guard(mutant: Mutant, repo_root: Path, tmp_path: Path) -> None:
     root = _copy(repo_root, tmp_path)
