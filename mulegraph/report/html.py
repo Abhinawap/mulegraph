@@ -17,14 +17,6 @@ import matplotlib.pyplot as plt  # noqa: E402
 #: Alerts shown in the page; the full ranked queue is the CSV beside it.
 TOP_ALERTS = 25
 
-#: What each detector compares, and what a flag means in plain words.
-DETECTORS = {
-    "psi": ("input features", "the largest shift of any one feature"),
-    "ks": ("input features", "the share of features whose distribution differs"),
-    "conf": ("model scores", "how far the score distribution has moved"),
-    "alert": ("model scores", "how much the share of alerts has changed"),
-}
-
 FLAGGED, CLEAR = "#d55e00", "#0072b2"
 
 STYLE = """
@@ -74,8 +66,8 @@ def write_score_report(path: Path, health: dict[str, Any], alerts: pd.DataFrame)
     else:
         banner = '<div class="banner clear"><strong>No detector flagged this batch.</strong></div>'
     rows = "".join(
-        f"<tr><td>{e(d['detector'])}</td><td>{e(DETECTORS[d['detector']][0])}</td>"
-        f"<td>{e(DETECTORS[d['detector']][1])}</td><td>{d['score']:.3f}</td>"
+        f"<tr><td>{e(d['detector'])}</td><td>{e(d['compares'])}</td>"
+        f"<td>{e(d['means'])}</td><td>{d['score']:.3f}</td>"
         f"<td>{d['flag_at']:.3f}</td><td>{'yes' if d['detector'] in flagged else 'no'}</td></tr>"
         for d in health["detectors"]
     )
@@ -95,11 +87,12 @@ def write_score_report(path: Path, health: dict[str, Any], alerts: pd.DataFrame)
         .drop(columns="unit")
         .to_html(index=False, escape=True, border=0, float_format=lambda v: f"{v:.4f}")
     )
+    batch = e(str(health["batch"]))
     page = f"""<!doctype html>
 <html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Batch {health["batch"]} report</title><style>{STYLE}</style></head><body>
-<h1>Batch {health["batch"]}: {health["alerts"]:,} alerts from {health["units_scored"]:,} units</h1>
+<title>Batch {batch} report</title><style>{STYLE}</style></head><body>
+<h1>Batch {batch}: {health["alerts"]:,} alerts from {health["units_scored"]:,} units</h1>
 {banner}
 <p class="note">{e(health["note"])}</p>
 <h2>Health check</h2>

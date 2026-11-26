@@ -129,6 +129,9 @@ regenerated later (NFR-1).
   re-report code the fix did not touch, but trace every caller and consumer of
   what it changed. If it touches a test or a threshold consumer, redo the
   PR-E4 output-to-test map.
+- A finding needs a plausible mistake: code written to defeat a guard (a builtin
+  or `DataFrame` subclass that changes how a value formats or renders, or a
+  module function or table rebound at run time) is out of scope.
 - Doc prose about what the tests check (README, `docs/`) is out of scope: it
   is checked before the PR. PR-E3 significance wording, docstrings and code
   comments stay in scope wherever they appear.
