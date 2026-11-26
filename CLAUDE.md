@@ -109,7 +109,7 @@ uv run mulegraph smoke                     # ~15 s, synthetic graph, benchmark +
 
 # Quality
 uv run ruff check . && uv run ruff format .
-uv run pytest -m "not integrity" --cov=mulegraph
+uv run pytest -m "not integrity" -n 3 --cov=mulegraph  # one thread per worker (root conftest.py)
 flock /tmp/mulegraph-integrity.lock uv run pytest -m integrity -n 3  # planted-bug rows, one run per machine
 # ...append --rows-for <paths from git diff --name-only --no-renames <base>> to run only the rows a diff needs
 uv run python scripts/dump_outputs.py before/   # refactor check: dump on the branch too, diff -r

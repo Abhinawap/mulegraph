@@ -7,6 +7,10 @@ from pathlib import Path
 
 import pytest
 
+# One OpenMP/BLAS thread per xdist worker, set before numpy, XGBoost or torch load (#109).
+if os.environ.get("PYTEST_XDIST_WORKER"):
+    os.environ.setdefault("OMP_NUM_THREADS", "1")
+
 #: Paths whose change can matter to no planted row but those whose guards they hold (NFR-2).
 _ROWS = "test_integrity_mutants.py"
 _NARROWING = ("docs/", ".claude/agents/")
