@@ -30,11 +30,13 @@ transactions: the largest connected group of laundering transactions with at mos
 - **Graph features cut an analyst's alert queue about 6×.** On 5 million simulated bank
   transactions, adding network patterns (money fanning in, fanning out, or splitting and
   regathering, computed only from past transactions) cuts the alerts an analyst opens per real
-  laundering case from 26 to 4.4 while still catching half of the cases. The graph neural network I
-  tested added nothing on top.
+  laundering case from 26 to 4.4 while still catching half of the cases, and from 77 to 41 when
+  catching 80%. The graph neural network I tested did worse than the tree model given the same
+  features.
 - **How you test the model changes the answer more than which model you pick.** The score used
-  here is F1, from 0 to 1, which rewards catching laundering and penalises false alarms. Tested on a
-  random shuffle of the data, which lets the model see the future, every model scores 0.90–0.96.
+  here is F1, from 0 to 1, which rewards catching laundering and penalises false alarms. On the
+  Bitcoin data, tested on a random shuffle, which lets the model see the future, every model scores
+  0.90–0.96.
   Tested honestly, training on earlier weeks and scoring later ones, they score 0.56–0.78, and the
   tree models match published results. The toolkit only reports the honest version as the headline.
 - **When criminal behaviour changed, no label-free alarm warned in time.** After a dark market shut
@@ -42,13 +44,28 @@ transactions: the largest connected group of laundering transactions with at mos
   drift detectors, which compare today's data with the training data without knowing which
   transactions were criminal, warned of it. Only retraining on freshly labelled cases recovered the
   models, and slowly. The practical lesson: budget for fast labelling and scheduled retraining,
-  and don't rely on drift alarms alone.
+  and don't rely on drift alarms alone. See
+  [When criminal behaviour changes](#when-criminal-behaviour-changes).
 
 ![Alerts per real case caught](report/figures/readme_alert_load.png)
 
 *XGBoost on AMLworld HI-Small, test days 8–9 (862,792 transactions, 956 laundering). Days 10–17
 are left out because the simulator stops ordinary traffic there and 59% of what remains is
 laundering, which flatters every model. Regenerate with `scripts/readme_figures.py`.*
+
+![F1 under a random and a temporal split](report/figures/readme_eval_gap.png)
+
+*Elliptic++, F1 on the illicit class, five-seed means. A random split lets a model train on
+transactions from after the ones it is tested on, so every model scores 0.90–0.96; trained on
+earlier time steps and tested from t38, they score 0.56–0.78. On this dataset the causal graph
+features add nothing (XGBoost 0.722 → 0.718); the published neighbour aggregates (`xgb.raw165`) are
+the row that gains. Regenerate with `scripts/readme_figures.py`.*
+
+To see the tool, run `uv run mulegraph smoke` (15 s, synthetic data, no downloads). To check the 6×,
+the numbers are in `report/tables/amlworld_alert_load.csv`;
+`uv run mulegraph run --config configs/amlworld_xgb.yaml` regenerates the run in about 8 minutes
+once the dataset is downloaded, and `uv run python scripts/readme_figures.py` redraws the README
+figures from it and the Elliptic tables.
 
 ## What it does
 
