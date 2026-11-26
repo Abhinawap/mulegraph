@@ -12,25 +12,14 @@ import pandas as pd
 import pytest
 
 from mulegraph import pipeline
-from mulegraph.config import DriftRunConfig
+from mulegraph.config import DetectorConfig, DriftConfig, DriftRunConfig
 from mulegraph.data import load_dataset
 from mulegraph.drift.detectors import alert_shift, conf_shift, ks_frac, psi
-from mulegraph.drift.monitor import lead_time, score_batches
+from mulegraph.drift.monitor import DETECTORS, lead_time, score_batches
 from mulegraph.eval.threshold import choose_threshold
 from mulegraph.features.builder import build_features
 from mulegraph.features.select import select_features
 from mulegraph.util import Paths
-
-#: DriftConfig's defaults, spelled out: drift/ never imports the config (coupling rule).
-FLAGS = dict(
-    detectors=("psi", "ks", "conf", "alert"),
-    bins=10,
-    psi_flag=0.2,
-    ks_alpha=0.01,
-    ks_frac_flag=0.2,
-    conf_flag=0.1,
-    alert_flag=0.2,
-)
 
 
 def _shifted(delta: float, seed: int = 0) -> tuple[np.ndarray, np.ndarray]:
@@ -79,6 +68,13 @@ def test_no_detector_accepts_labels() -> None:
     for fn in (psi, ks_frac, conf_shift, alert_shift, score_batches):
         names = set(inspect.signature(fn).parameters)
         assert not any(n == "y" or "label" in n for n in names), (fn.__name__, names)
+    # score_batches takes its settings as one value; run_drift passes a DriftConfig, whose
+    # fields include every DetectorConfig field.
+    fields = set(DriftConfig.model_fields)
+    assert not any(n == "y" or "label" in n for n in fields), fields
+    # A run cannot swap a scorer that the end-to-end test's recompute would then inherit.
+    with pytest.raises(TypeError):
+        DETECTORS["ks"] = DETECTORS["psi"]
 
 
 def test_lead_time_is_first_drop_minus_first_flag() -> None:
@@ -134,7 +130,9 @@ def test_calibrated_thresholds_are_the_reference_noise_floor() -> None:
     proba = rng.uniform(size=2000)
     proba[batch == 11] = rng.uniform(0.5, 1.0, size=400)
 
-    table = score_batches(values, proba, batch, [1, 2, 3], calibrate=True, threshold=0.5, **FLAGS)
+    table = score_batches(
+        values, proba, batch, [1, 2, 3], DetectorConfig(calibrate=True), threshold=0.5
+    )
     flagged = table.set_index(["detector", "batch_id"])["flagged"]
     assert not flagged.loc[("psi", 10)] and not flagged.loc[("conf", 10)]
     assert not flagged.loc[("alert", 10)]
@@ -145,7 +143,7 @@ def test_calibrated_thresholds_are_the_reference_noise_floor() -> None:
     assert floor["alert"] >= 0
 
     with pytest.raises(ValueError, match="two populated reference batches"):
-        score_batches(values, proba, batch, [1], calibrate=True, threshold=0.5, **FLAGS)
+        score_batches(values, proba, batch, [1], DetectorConfig(calibrate=True), threshold=0.5)
 
 
 @pytest.fixture
@@ -283,17 +281,6 @@ def test_every_drift_use_of_the_threshold_is_its_runs_validation_optimum(
     regime = cfg.split.regimes[0]
     window = (data.batch_id >= regime.val[0]) & (data.batch_id <= regime.test[1])
     scored_idx = np.flatnonzero(window)
-    d = cfg.drift
-    flags = {
-        "detectors": d.detectors,
-        "bins": d.bins,
-        "psi_flag": d.psi_flag,
-        "ks_alpha": d.ks_alpha,
-        "ks_frac_flag": d.ks_frac,
-        "conf_flag": d.conf_flag,
-        "alert_flag": d.alert_flag,
-        "calibrate": d.calibrate,
-    }
     for run_id in runs["run_id"]:
         path = mlflow.artifacts.download_artifacts(
             run_id=run_id, artifact_path="predictions.parquet"
@@ -308,14 +295,15 @@ def test_every_drift_use_of_the_threshold_is_its_runs_validation_optimum(
         # configured flags and model scores. Only labelled scores are stored, so only those are
         # pinned; a shift of every score, as toward a test-searched cut, moves them too.
         call = detect.call_args_list[order.index(key)]
-        values, proba, batch, ref = call.args
+        values, proba, batch, ref, settings = call.args
         np.testing.assert_array_equal(values, select_features(data, gfp, key[1]).values[window])
         np.testing.assert_array_equal(batch, data.batch_id[window])
         np.testing.assert_array_equal(ref, np.arange(regime.val[0], regime.val[1] + 1))
         stored = frame.set_index("idx")["proba"]
         labelled = np.isin(scored_idx, stored.index)
         np.testing.assert_array_equal(proba[labelled], stored.loc[scored_idx[labelled]])
-        assert {k: v for k, v in call.kwargs.items() if k != "threshold"} == flags
+        assert settings == DriftRunConfig.model_validate(pinned).drift
+        assert set(call.kwargs) == {"threshold"}
 
         thr, val_f1 = choose_threshold(val["y"], val["proba"])
         want = _drift_outputs(val, test, thr, event, call, cfg)

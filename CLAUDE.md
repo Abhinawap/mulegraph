@@ -37,7 +37,7 @@ docs/
 
 **Score data flow (D5):** same load, features and split → fit once and cache the model plus its validation threshold → score one batch → ranked alert queue + label-free health check + static HTML page → exit 3 on a flag.
 
-**Component coupling rule:** every component depends only on the shared types in `types.py`. Only `pipeline.py` imports across subsystems.
+**Component coupling rule:** every component depends only on `types.py` and `config.py`, neither of which imports from the package. Only `pipeline.py` imports across subsystems.
 
 ## Tech Stack
 
