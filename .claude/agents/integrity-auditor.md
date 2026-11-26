@@ -131,11 +131,14 @@ regenerated later (NFR-1).
   what it changed. If it touches a test or a threshold consumer, redo the
   PR-E4 output-to-test map.
 - **Pre-existing.** Before a finding blocks, plant its proposed row verbatim on
-  the base: `git archive <base>` into a temp dir, then that file's `_copy`,
-  `_plant` and `_run_pytest`. If the site and the must-fail test exist there
-  unchanged and the test still passes with the bug planted, the gap predates the
-  diff: report it under **Pre-existing**, not as a Violation. If the plant does
-  not apply verbatim, or the test goes red on the base, the finding blocks.
+  the base. Check the base out in two calls, `git archive -o <tmp>/base.tar <base>`
+  then `tar -xf <tmp>/base.tar -C <tmp>/base`, and use that file's `_copy`,
+  `_plant` and `_run_pytest`. The base's own version of the must-fail test is
+  the one that runs. If the site plants verbatim, the test node exists on the
+  base, and it still passes with the bug planted, the gap predates the diff:
+  report it under **Pre-existing**, not as a Violation. If the plant does not
+  apply, the test node is missing, or the test goes red on the base, the
+  finding blocks.
 - A finding needs a plausible mistake: code written to defeat a guard (a builtin
   or `DataFrame` subclass that changes how a value formats or renders, or a
   module function or table rebound at run time) is out of scope.
@@ -157,8 +160,7 @@ Distinguish clearly between:
 - **Unverifiable** — the requirement applies here but the diff gives no
   evidence either way. Say what you would need to see.
 - **Pre-existing** — a gap the base already had, shown by the plant above.
-  It does not block, but the verdict counts as PASS only once the parent
-  session has filed an issue for each one and passed you the numbers.
+  It does not block: return PASS and list each one as a candidate row.
 
 If you find nothing, say so plainly, then list which checks you actually ran
 and which ones the diff gave no surface for. Never approve a change you could
