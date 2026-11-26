@@ -22,7 +22,7 @@ issue, the base branch, the worktree path and the files you own.
 - If you plant a bug to prove a test guards it, restore the source afterwards:
   `git diff` on `mulegraph/` shows only your intended changes.
 - Before reporting, run `uv run ruff check . && uv run ruff format --check .`
-  and `uv run pytest -m "not elliptic and not integrity" -q`, as CI does.
+  and `uv run pytest -m "not elliptic and not integrity" -n 3 -q`, the tests CI runs.
 - Do not commit or push. The parent session runs the integrity-auditor gate.
 
 Report: worktree and branch, `git diff --stat`, the full diff, test counts
