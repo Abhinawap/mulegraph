@@ -419,10 +419,16 @@ MUTANTS = [
     Mutant(
         "logged ts_* metrics at a test-searched threshold",
         "mulegraph/pipeline.py",
-        "for row in curve.itertuples(index=False):\n            mlflow.log_metrics(",
-        f"for row in per_timestep(test, {ON_TEST}).itertuples(index=False):\n"
-        "            mlflow.log_metrics(",
+        'f"ts_{name}": getattr(row, name)',
+        'f"ts_{name}": getattr(bad, name)',
         (LOGGED_F1,),
+        also=(
+            (
+                "for row in curve.itertuples(index=False):",
+                "for row, bad in zip(curve.itertuples(index=False),"
+                f" per_timestep(test, {ON_TEST}).itertuples(index=False), strict=True):",
+            ),
+        ),
     ),
     Mutant(
         "labels folded into the detector batch ids (PR-R2)",
@@ -665,16 +671,16 @@ MUTANTS = [
         "logged test_* metrics at a test-searched threshold",
         "mulegraph/pipeline.py",
         "**scored,",
-        f'**scored | {{"test_f1": compute_metrics(test.y, test.proba, {ON_TEST}, ["f1"])["f1"]}},',
+        f'**{{**scored, "test_f1": compute_metrics(test.y, test.proba, {ON_TEST}, ["f1"])["f1"]}},',
         (LOGGED_F1,),
     ),
     Mutant(
         "logged diag_* entries at a test-searched threshold",
         "mulegraph/pipeline.py",
         "**diagnostics,",
-        f"**diagnostics | {{f'diag_{{k}}': v for k, v in"
+        f"**{{**diagnostics, **{{f'diag_{{k}}': v for k, v in"
         f' compute_metrics(test.y, test.proba, {ON_TEST}, ["f1"]).items()'
-        " if f'diag_{k}' in diagnostics},",
+        " if f'diag_{k}' in diagnostics}},",
         (LOGGED_F1,),
     ),
 ]
@@ -772,22 +778,43 @@ SINK_PREFIXES = ("mulegraph.report.", "mlflow.log_", "mlflow.set_tag")
 
 
 def _planted_sites(text: str) -> list[tuple[int, int]]:
-    """Byte spans in pipeline.py ``text`` of each row's site that plants a bug there."""
-    data = text.encode()
-    # A row that keeps its site verbatim and only inserts code beside it plants nothing there.
-    sites = [
-        m.site.encode()
-        for m in MUTANTS
-        if m.file == "mulegraph/pipeline.py" and m.site in text and m.site not in m.broken
-    ]
-    return [(data.index(s), data.index(s) + len(s)) for s in sites]
+    """Byte spans in pipeline.py ``text`` of the bytes each row's plant changes (PR-E4)."""
+    data, spans, tree = text.encode(), [], ast.dump(ast.parse(text))
+    for m in MUTANTS:
+        if m.file != "mulegraph/pipeline.py" or m.site not in text:
+            continue
+        # A site edit that leaves the code as parsed unchanged (a comment, a space) plants nothing;
+        # one that parses only with its ``also`` changes something.
+        try:
+            if ast.dump(ast.parse(text.replace(m.site, m.broken, 1))) == tree:
+                continue
+        except SyntaxError:
+            pass
+        # ponytail: two separate edits in one site make one span from the first to the last, which
+        # still plants an entry left verbatim between them (the meta[commit] leak, smaller).
+        # Upgrade: diff the parsed outputs before and after each plant (closes the hole and takes
+        # both ``**scored`` spellings, ~1 s per scan, but rewrites _unsunk, which expands dicts
+        # by byte span). Neither catches a site edit that changes the code but not what it writes
+        # (``**dict(scored)``) with the bug in ``also``; only reading the row does.
+        site, broken, lo = m.site.encode(), m.broken.encode(), data.index(m.site.encode())
+        # Strip the full common prefix and suffix. When they overlap, the span is inverted: an
+        # insertion that may sit anywhere between its ends (``**s, **scored``), so it plants only
+        # a span it lies strictly inside. An empty span is an insertion at one point, likewise.
+        head = len(os.path.commonprefix([site, broken]))
+        tail = len(os.path.commonprefix([site[::-1], broken[::-1]]))
+        spans.append((lo + head, lo + len(site) - tail))
+    return spans
 
 
 def _planted_lines(text: str) -> set[int]:
-    """Line numbers of pipeline.py ``text`` that some row's site plants a bug on."""
-    data, planted = text.encode(), set()
-    for lo, hi in _planted_sites(text):
-        planted.update(range(data[:lo].count(b"\n") + 1, data[:hi].count(b"\n") + 2))
+    """Line numbers of pipeline.py ``text`` whose code some row's changed bytes overlap (PR-E4)."""
+    data, spans, planted, start = text.encode(), _planted_sites(text), set(), 0
+    for n, line in enumerate(data.split(b"\n"), 1):
+        lo = start + len(line) - len(line.lstrip())
+        hi = start + len(line.rstrip())
+        if any(lo < b and a < hi for a, b in spans):
+            planted.add(n)
+        start += len(line) + 1
     return planted
 
 
@@ -809,7 +836,7 @@ def _imports(tree: ast.Module) -> dict[str, str]:
 
 
 def _unsunk(text: str) -> list[str]:
-    """``function: source`` of each output, and dict entry reaching one, no row's site overlaps."""
+    """``function: source`` of each output, and dict entry reaching one, no change overlaps."""
     tree, data = ast.parse(text), text.encode()
     bound, sites = _imports(tree), _planted_sites(text)
     starts = [0]
@@ -1013,6 +1040,7 @@ def test_a_new_dict_entry_is_seen_by_the_sink_scan(repo_root: Path) -> None:
     ) == {"_log_child: mlflow.log_metrics[**extra]"}
     assert added(
         '                "fit_seconds": info.seconds,\n',
+        '                "fit_seconds": info.seconds,\n'
         '                "cut_x2": fitted.threshold * 2,\n',
     ) == {"_log_child: mlflow.log_metrics[cut_x2] = fitted.threshold * 2"}
     # A dict straight into an excused sink is one output, so only its whole-call key moves.
@@ -1020,6 +1048,62 @@ def test_a_new_dict_entry_is_seen_by_the_sink_scan(repo_root: Path) -> None:
         "run_drift: mlflow.log_params({'dataset_version': data.meta.version,"
         " 'seeds': list(cfg.seeds), 'cut_x2': 1})"
     }
+
+
+META_VAL_F1 = '"val_f1": fitted.val_f1, "commit": commit'
+SCORED = "_log_child: mlflow.log_metrics[**scored]"
+TS = 'f"ts_{name}": getattr(row, name)'
+
+
+@pytest.mark.parametrize(
+    ("site", "broken", "entry", "planted"),
+    [
+        (META_VAL_F1, '"val_f1": 0.0, "commit": commit', "_deployed_model: meta[val_f1]", True),
+        # A site that runs on over an entry the plant leaves verbatim does not plant it.
+        (META_VAL_F1, '"val_f1": 0.0, "commit": commit', "_deployed_model: meta[commit]", False),
+        ("**scored,", '**{**scored, "test_f1": 0.0},', SCORED, True),
+        # An insertion on the value's boundary fails closed: it reads as a new entry.
+        ("**scored,", '**scored | {"test_f1": 0.0},', SCORED, False),
+        # An insertion before a value that repeats its bytes is not placed inside it.
+        ("**scored,", "**s, **scored,", SCORED, False),
+        # A site edit that changes nothing as parsed plants nothing, whatever its `also` does.
+        (TS, TS, "_log_child: mlflow.log_metrics({f'ts_{name}'", False),
+        (TS, TS + "  # x", "_log_child: mlflow.log_metrics({f'ts_{name}'", False),
+    ],
+)
+def test_a_row_plants_only_the_entries_its_changed_bytes_overlap(
+    repo_root: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    site: str,
+    broken: str,
+    entry: str,
+    planted: bool,
+) -> None:
+    """PR-E4: the sink scan counts an entry planted only where a row's changed bytes overlap it."""
+    monkeypatch.setitem(
+        globals(), "MUTANTS", [Mutant("synthetic", "mulegraph/pipeline.py", site, broken, ())]
+    )
+    left = _unsunk((repo_root / "mulegraph" / "pipeline.py").read_text())
+    assert any(s.startswith(entry) for s in left) is not planted
+
+
+CURVE = "curve = per_timestep(test, fitted.test_threshold)"
+
+
+@pytest.mark.parametrize(
+    ("broken", "planted"),
+    [("x = 1; " + CURVE, False), (CURVE.replace(")", " * 2)"), True)],
+)
+def test_an_insertion_plants_a_line_only_strictly_inside_its_code(
+    repo_root: Path, monkeypatch: pytest.MonkeyPatch, broken: str, planted: bool
+) -> None:
+    """PR-E4: an insertion before a threshold line's code leaves the line unplanted."""
+    monkeypatch.setitem(
+        globals(), "MUTANTS", [Mutant("synthetic", "mulegraph/pipeline.py", CURVE, broken, ())]
+    )
+    text = (repo_root / "mulegraph" / "pipeline.py").read_text()
+    line = text[: text.index(CURVE)].count("\n") + 1
+    assert (line in _planted_lines(text)) is planted
 
 
 #: Rows that recompute an F1, with the honest threshold in their scope.

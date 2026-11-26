@@ -25,12 +25,13 @@ List every place the threshold, or a number computed from it, reaches an
 output: an MLflow metric, a CSV, a figure, a detector argument. Start from
 `test_every_output_sink_is_planted_or_excused`, which already requires every
 output of a listed kind in `pipeline.py` (`SINK_PREFIXES`, `SINK_METHODS`, a
-`run_*` return value) to sit under a row's site or carry an `UNSUNK` reason,
+`run_*` return value) to sit under the bytes a row's `site` edit changes (never its `also`) or carry an `UNSUNK` reason,
 and each entry of a dict literal passed straight into a planted output, or bound
-to a name the same function passes to an output, to have a row's site over its
+to a name the same function passes to an output, to have those changed bytes over its
 value or a reason keyed `function: name[key] = value`. Check the reasons, any
-output kind the two constants miss, any entry planted only because a row's site
-for a neighbouring entry overlaps its value and leaves it unchanged, any
+output kind the two constants miss, any entry planted only because it sits between
+two separate edits of one row's site and is left unchanged, any site edit that
+changes the code but not what it writes (`**dict(scored)`) with the bug in `also`, any
 value a site covers only in part, and any value that reaches a planted
 output by another route (a non-dict argument, a dict nested inside an argument or
 built in another function, a key set after the literal); then walk back from each sink
