@@ -21,6 +21,8 @@ META = {
         "test_a_new_output_is_seen_by_the_sink_scan",
         "test_a_new_dict_entry_is_seen_by_the_sink_scan",
         "test_a_missing_site_fails_with_site_moved",
+        "test_a_row_plants_only_the_entries_its_changed_bytes_overlap",
+        "test_an_insertion_plants_a_line_only_strictly_inside_its_code",
     )
 }
 
@@ -57,9 +59,10 @@ def test_a_docs_only_diff_selects_only_the_controls(repo_root: Path) -> None:
 
 
 def test_a_narrowed_run_keeps_the_unmarked_meta_tests(repo_root: Path) -> None:
-    """Under default markers a narrowed run still collects the five unmarked tests (NFR-2)."""
+    """Under default markers a narrowed run still collects every unmarked test (NFR-2)."""
     # The last -m wins; "not integrity" is the addopts default.
-    assert _collected(repo_root, "-m", "not integrity", "--rows-for", "docs/x.md") == META
+    narrowed = _collected(repo_root, "-m", "not integrity", "--rows-for", "docs/x.md")
+    assert {n.split("[")[0] for n in narrowed} == META  # parametrized cases by function
 
 
 def test_no_guard_file_imports_another_test_file(repo_root: Path) -> None:
