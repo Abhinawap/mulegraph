@@ -1,5 +1,5 @@
-"""README figures from the latest amlworld_xgb run, elliptic_rolling_curves.csv and the cached
-AMLworld graph (NFR-1)."""
+"""README figures from the latest amlworld_xgb run, elliptic_mvp_results.csv,
+elliptic_rolling_curves.csv and the cached AMLworld graph (NFR-1)."""
 
 from __future__ import annotations
 
@@ -18,6 +18,13 @@ REALISTIC_DAYS = (8, 9)  # ordinary traffic stops on day 10; after it 59% of row
 RECALLS = (0.5, 0.8)
 MAX_ACCOUNTS = 30
 FEATURES = {"base": "Transaction fields only", "base_gfp": "+ graph features"}
+ELLIPTIC_ROWS = {  # the README results table's order
+    ("xgb", "base"): "XGBoost, 93 transaction features",
+    ("xgb", "base_gfp"): "XGBoost, + graph features",
+    ("xgb", "raw165"): "XGBoost, all 165 (neighbour aggregates)",
+    ("sage", "base"): "GraphSAGE, 93 transaction features",
+    ("sage", "base_gfp"): "GraphSAGE, + graph features",
+}
 
 
 def alert_load(paths: Paths) -> pd.DataFrame:
@@ -68,6 +75,29 @@ def plot_alert_load(table: pd.DataFrame, paths: Paths) -> None:
     ax.spines[["top", "right"]].set_visible(False)
     ax.legend(frameon=False)
     _save(fig, paths.figures_dir() / "readme_alert_load.png")
+
+
+def plot_eval_gap(paths: Paths) -> None:
+    """Elliptic test F1, random vs temporal split, five-seed means (NFR-1)."""
+    results = pd.read_csv(paths.tables_dir() / "elliptic_mvp_results.csv")
+    f1 = (
+        results[results["metric"] == "test_f1"]
+        .pivot(index=["model", "features"], columns="regime", values="seed_mean")
+        .loc[list(ELLIPTIC_ROWS)]
+    )
+    y = np.arange(len(f1))[::-1]
+    fig, ax = plt.subplots(figsize=(7, 2.9))
+    ax.hlines(y, f1["temporal"], f1["random"], color="#d0d5db", lw=2, zorder=1)
+    ax.scatter(f1["temporal"], y, s=60, color="#1f5fa8", zorder=2, label="Temporal split (honest)")
+    ax.scatter(f1["random"], y, s=60, color="#9aa5b1", zorder=2, label="Random split (leaky)")
+    ax.set_yticks(y, list(ELLIPTIC_ROWS.values()))
+    ax.set_xlim(0.5, 1)
+    ax.set_xlabel("F1, illicit transactions")
+    ax.set_title("A random split flatters every model", pad=22)
+    ax.spines[["top", "right", "left"]].set_visible(False)
+    ax.tick_params(axis="y", length=0)
+    ax.legend(frameon=False, loc="lower center", bbox_to_anchor=(0.5, 0.98), ncols=2)
+    _save(fig, paths.figures_dir() / "readme_eval_gap.png")
 
 
 def plot_recovery(paths: Paths) -> None:
@@ -136,6 +166,7 @@ def plot_laundering_subgraph(paths: Paths) -> None:
 
 if __name__ == "__main__":
     paths = Paths.from_env()
+    plot_eval_gap(paths)  # committed table only: first, so it redraws without MLflow or data
     table = alert_load(paths)
     print(table.to_string(index=False))
     plot_alert_load(table, paths)

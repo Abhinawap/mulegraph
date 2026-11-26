@@ -6,7 +6,7 @@
 
 **Expected finding:** graph *features* matter more than graph *models*. Confirming or overturning it is a result either way — never tune toward the expected answer.
 
-**Headline piece:** the label-free drift monitor's lead time on Elliptic's real t43 dark-market collapse (F1 0.85 → 0.02). The two-by-two benchmark on Elliptic++ and AMLworld HI-Small is the context for it.
+**Headline piece:** graph features cut XGBoost's alerts per laundering case caught from 26.3 to 4.4 at recall 0.5 on AMLworld HI-Small (test days 8–9); on Elliptic the gain comes from the published neighbour aggregates, not the causal GFP features. Both are XGBoost-vs-XGBoost gaps, so report them as effect sizes and never as significant (PR-E3). The main negative finding: no label-free drift detector holds a flag before Elliptic's t43 collapse (F1 0.85 → 0.02).
 
 ## Architecture Overview
 
