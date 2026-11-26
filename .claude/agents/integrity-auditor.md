@@ -38,7 +38,7 @@ built in another function, a key set after the literal); then walk back from eac
 to the threshold. For each, name its row in `tests/test_integrity_mutants.py`,
 which plants a threshold chosen on test rows there and requires its guard test
 to go red. A place with no row is a finding, even when the code there is
-correct today; so is an `UNPLANTED` or `UNSUNK` reason that does not hold. A row's pass is the plant's evidence: plant by hand
+correct today (unless it is pre-existing, below); so is an `UNPLANTED` or `UNSUNK` reason that does not hold. A row's pass is the plant's evidence: plant by hand
 (with that file's `_copy`, `_plant` and `_run_pytest`) only a candidate row
 you are proposing, never one that already exists. Report each candidate as a
 row (site, broken replacement, must-fail test node) for the implementer to add.
@@ -46,10 +46,10 @@ row (site, broken replacement, must-fail test node) for the implementer to add.
 Run the rows a diff needs with
 
 ```bash
-flock /tmp/mulegraph-integrity.lock uv run pytest -m integrity -n 3 --rows-for $(git diff --name-only --no-renames <base>)
+flock /tmp/mulegraph-integrity.lock uv run pytest -m integrity -n 3 --rows-for <paths>
 ```
 
-so a second session waits instead of both running out of memory. The five meta-tests
+with the paths from `git diff --name-only --no-renames <base>`, so a second session waits instead of both running out of memory. The five meta-tests
 this section starts from carry no `integrity` mark, so `-m integrity` deselects
 them; run them with default markers:
 
@@ -130,6 +130,12 @@ regenerated later (NFR-1).
   re-report code the fix did not touch, but trace every caller and consumer of
   what it changed. If it touches a test or a threshold consumer, redo the
   PR-E4 output-to-test map.
+- **Pre-existing.** Before a finding blocks, plant its proposed row verbatim on
+  the base: `git archive <base>` into a temp dir, then that file's `_copy`,
+  `_plant` and `_run_pytest`. If the site and the must-fail test exist there
+  unchanged and the test still passes with the bug planted, the gap predates the
+  diff: report it under **Pre-existing**, not as a Violation. If the plant does
+  not apply verbatim, or the test goes red on the base, the finding blocks.
 - A finding needs a plausible mistake: code written to defeat a guard (a builtin
   or `DataFrame` subclass that changes how a value formats or renders, or a
   module function or table rebound at run time) is out of scope.
@@ -150,6 +156,9 @@ Distinguish clearly between:
 - **Violation** — the code demonstrably breaks a requirement.
 - **Unverifiable** — the requirement applies here but the diff gives no
   evidence either way. Say what you would need to see.
+- **Pre-existing** — a gap the base already had, shown by the plant above.
+  It does not block, but the verdict counts as PASS only once the parent
+  session has filed an issue for each one and passed you the numbers.
 
 If you find nothing, say so plainly, then list which checks you actually ran
 and which ones the diff gave no surface for. Never approve a change you could

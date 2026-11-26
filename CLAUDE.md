@@ -85,8 +85,9 @@ All code is written under the **ponytail** skill (`/ponytail`, full level). Befo
 ## Repository Etiquette
 
 - Start every branch in its own worktree: from the main checkout call `EnterWorktree` (name `<issue>`), then `git branch -m <feature|fix>/<description>` — it names the branch `worktree-<name>`. Do not use `git worktree add ../…`: the harness refuses writes outside the session's worktree. A session that starts in a stale worktree (merged branch) cannot create or switch to another: stop and restart it from the main checkout. The main checkout is shared with other sessions. NEVER commit directly to `main`.
+- In a worktree session, run each git command in its own shell call: the harness refuses `&&` chains, `$(…)` and heredocs that run git.
 - Run `ruff check .` and `pytest` before pushing. NEVER force push to `main`.
-- Changes to splits, features, evaluation, thresholding, drift or model fitting: commit and open the PR only after the `integrity-auditor` agent returns PASS on the final diff. Before each round, snapshot the tree with `git add -A && git stash create`. The first audit is a full round; after each fix, run a delta round with a fresh auditor (never a resumed one) given the prior findings and Unverifiable items and the previous and current snapshot SHAs. Before the final snapshot, the session opening the PR checks that every claim in README and `docs/` about what a test asserts matches the test; a mismatch blocks the PR. `/code-review` is not part of this gate; `/ponytail-review` covers standards.
+- Changes to splits, features, evaluation, thresholding, drift or model fitting: commit and open the PR only after the `integrity-auditor` agent returns PASS on the final diff. Before each round, snapshot the tree with `git add -A`, then `git stash create`. The first audit is a full round; after each fix, run a delta round with a fresh auditor (never a resumed one) given the prior findings and Unverifiable items and the previous and current snapshot SHAs. Before the final snapshot, the session opening the PR checks that every claim in README and `docs/` about what a test asserts matches the test; a mismatch blocks the PR. `/code-review` is not part of this gate; `/ponytail-review` covers standards.
 - Commit messages describe the change and, where relevant, the requirement ID it satisfies (e.g. `PR-F2`).
 - Keep commits focused on single changes.
 
@@ -110,7 +111,7 @@ uv run mulegraph smoke                     # ~15 s, synthetic graph, benchmark +
 uv run ruff check . && uv run ruff format .
 uv run pytest -m "not integrity" --cov=mulegraph
 flock /tmp/mulegraph-integrity.lock uv run pytest -m integrity -n 3  # planted-bug rows, one run per machine
-# ...append --rows-for $(git diff --name-only --no-renames <base>) to run only the rows a diff needs
+# ...append --rows-for <paths from git diff --name-only --no-renames <base>> to run only the rows a diff needs
 uv run python scripts/dump_outputs.py before/   # refactor check: dump on the branch too, diff -r
 # before/after timing: old then new back to back, both under flock /tmp/mulegraph-integrity.lock; report both with the load average
 
@@ -122,6 +123,7 @@ uv run mlflow ui --backend-store-uri sqlite:///mlruns/mlflow.db
 
 CI (GitHub Actions) runs ruff, pytest with coverage, and `mulegraph smoke` on every push, and the planted-bug rows (`-m integrity`) in their own job. The full grid NEVER runs in CI.
 
+- A guard test compares the whole output with `==`, never `in` or a regex; copies mock arguments at call time (`call_args` holds references); and computes its expected values before the run starts.
 - A module-scoped fixture that runs a benchmark needs `pytestmark = pytest.mark.xdist_group("<module>")`; `addopts` carries `--dist loadgroup`, so the module stays on one worker under `-n`.
 
 Required unit tests (NFR-2):
